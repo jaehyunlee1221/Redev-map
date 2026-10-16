@@ -36,14 +36,27 @@ jobs:
           key: raw-${{ github.run_id }}
           restore-keys: raw-
       - name: fetch
-        run: python -m pipeline.fetch "$REGION"
+        shell: bash
+        run: python -m pipeline.fetch "$REGION" 2>&1 | tee fetch.log; exit ${PIPESTATUS[0]}
         env:
           VWORLD_KEY: ${{ secrets.VWORLD_KEY }}
           VWORLD_DOMAIN: ${{ secrets.VWORLD_DOMAIN }}
           DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
       - name: build
         if: always()                        # 수집이 일부 실패해도 받은 동까지는 지도에 반영
-        run: python -m pipeline.build "$REGION"
+        shell: bash
+        run: python -m pipeline.build "$REGION" 2>&1 | tee build.log; exit ${PIPESTATUS[0]}
+      - name: report                        # 로그 끝부분을 annotation으로 남김 (로그인 없이 API로 조회 가능)
+        if: always()
+        run: |
+          python - <<'EOF'
+          import pathlib
+          for n in ('fetch', 'build'):
+              p = pathlib.Path(f'{n}.log')
+              if p.exists():
+                  t = p.read_text(errors='replace')[-3000:].replace('%', '%25').replace('\r', '').replace('\n', '%0A')
+                  print(f'::notice title={n}.log::{t}')
+          EOF
       - uses: actions/upload-pages-artifact@v3
         if: always()
         with: { path: site }

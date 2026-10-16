@@ -11,6 +11,7 @@ BH = 'https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo'
 VK, DK = os.environ['VWORLD_KEY'], os.environ['DATA_GO_KR_KEY']
 DOM = os.environ.get('VWORLD_DOMAIN', '')
 MAX_AGE = 25 * 86400
+ERR = []
 
 
 def get(url, **p):
@@ -76,15 +77,22 @@ def main(arg):
         d.mkdir(parents=True, exist_ok=True)
         dongs = cached(d / 'dongs.json', lambda: [f for f in vw('LT_C_ADEMD_INFO', attrFilter=f'emd_cd:like:{sgg}')
                                                   if f['properties']['emd_cd'].startswith(sgg)])
+        print(sgg, f'{len(dongs)}개 동', flush=True)
         for f in dongs:
             emd = f['properties']['emd_cd']
             p10, box = emd + '00', 'BOX({},{},{},{})'.format(*shape(f['geometry']).bounds)
-            cached(d / f'{p10}_parcels.json', lambda: [x for x in vw('LP_PA_CBND_BUBUN', attrFilter=f'pnu:like:{p10}')
-                                                       if x['properties']['pnu'].startswith(p10)])
-            cached(d / f'{p10}_zones.json', lambda: vw('LT_C_UQ111', geomFilter=box))
-            cached(d / f'{p10}_owners.json', lambda: ned(p10))
-            cached(d / f'{p10}_bldgs.json', lambda: bh(sgg, emd[5:] + '00'))
-            print(sgg, emd, f['properties'].get('emd_kor_nm'), flush=True)
+            jobs = {'parcels': lambda: [x for x in vw('LP_PA_CBND_BUBUN', attrFilter=f'pnu:like:{p10}')
+                                        if x['properties']['pnu'].startswith(p10)],
+                    'zones': lambda: vw('LT_C_UQ111', geomFilter=box),
+                    'owners': lambda: ned(p10),
+                    'bldgs': lambda: bh(sgg, emd[5:] + '00')}
+            for k, fn in jobs.items():  # 하나 실패해도 나머지 계속
+                try:
+                    print(sgg, emd, f['properties'].get('emd_kor_nm'), k, len(cached(d / f'{p10}_{k}.json', fn)), flush=True)
+                except Exception as e:
+                    ERR.append(f'{p10} {k}: {e}')
+                    print('ERROR', ERR[-1], flush=True)
+    if ERR: sys.exit(f'{len(ERR)}건 실패\n' + '\n'.join(ERR[:20]))
 
 
 if __name__ == '__main__':
