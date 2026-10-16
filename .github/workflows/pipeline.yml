@@ -1,6 +1,9 @@
 name: pipeline
 
 on:
+  push:                    # 코드·설정이 바뀌면 자동 실행 (지역은 저장소 변수 REGION, 없으면 test)
+    branches: [main]
+    paths: ['pipeline/**', 'site/**', 'config.yaml', '.github/workflows/**']
   workflow_dispatch:
     inputs:
       region:
