@@ -41,6 +41,7 @@ def build_dong(sgg, p10):
 
 
 def main(arg):
+    OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / 'dongs.geojson'
     dongs = {f['properties']['c']: f for f in (load(path) or {'features': []})['features']}
     for sgg in regions(arg):

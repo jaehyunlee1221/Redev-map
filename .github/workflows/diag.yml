@@ -1,0 +1,18 @@
+name: diag
+on:
+  push:
+    branches: [main]
+    paths: ['pipeline/diag.py', '.github/workflows/diag.yml']
+  workflow_dispatch:
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install requests && python -m pipeline.diag > diag.log 2>&1; cat diag.log
+        env:
+          VWORLD_KEY: ${{ secrets.VWORLD_KEY }}
+          VWORLD_DOMAIN: ${{ secrets.VWORLD_DOMAIN }}
+          DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+      - if: always()
+        run: python -c "t=open('diag.log').read()[-4000:].replace('%','%25').replace('\n','%0A');print('::notice title=diag::'+t)"
