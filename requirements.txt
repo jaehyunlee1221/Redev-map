@@ -1,0 +1,4 @@
+requests
+shapely>=2.0
+pyyaml
+pytest

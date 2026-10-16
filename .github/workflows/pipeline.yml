@@ -1,0 +1,55 @@
+name: pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: 'config.yaml 지역 키 또는 시군구코드 (예: test / seoul / seoul,seongnam / 11650)'
+        default: test
+  schedule:
+    - cron: '0 18 1 * *'   # 매월 2일 03:00 KST
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency: { group: pipeline, cancel-in-progress: false }
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      REGION: ${{ inputs.region || vars.REGION || 'test' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12', cache: pip }
+      - run: pip install -r requirements.txt && python -m pytest -q tests
+      - uses: actions/cache@v4              # 원천데이터 캐시 → 끊겨도 다음 실행에서 이어받음
+        with:
+          path: data/raw
+          key: raw-${{ github.run_id }}
+          restore-keys: raw-
+      - name: fetch
+        run: python -m pipeline.fetch "$REGION"
+        env:
+          VWORLD_KEY: ${{ secrets.VWORLD_KEY }}
+          VWORLD_DOMAIN: ${{ secrets.VWORLD_DOMAIN }}
+          DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+      - name: build
+        if: always()                        # 수집이 일부 실패해도 받은 동까지는 지도에 반영
+        run: python -m pipeline.build "$REGION"
+      - uses: actions/upload-pages-artifact@v3
+        if: always()
+        with: { path: site }
+
+  deploy:
+    needs: build
+    if: always() && needs.build.result != 'cancelled'
+    runs-on: ubuntu-latest
+    environment: { name: github-pages, url: '${{ steps.d.outputs.page_url }}' }
+    steps:
+      - id: d
+        uses: actions/deploy-pages@v4

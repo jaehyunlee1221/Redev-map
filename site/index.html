@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>재개발 지도</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<style>
+  :root { --bg:#fff; --fg:#1f2328; --muted:#6b7280; --line:#e5e7eb; --accent:#2563eb; --ok:#16a34a; --bad:#dc2626; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; font:14px/1.45 -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; color:var(--fg); background:var(--bg); }
+  #map { position:absolute; inset:0; }
+  #bar { position:absolute; top:10px; left:10px; right:10px; display:flex; gap:6px; flex-wrap:wrap; z-index:2; }
+  #bar > * { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font:inherit; box-shadow:0 1px 4px #0002; }
+  #bar b { padding:8px 4px; border:0; box-shadow:none; background:transparent; }
+  button { cursor:pointer; }
+  button.on { background:var(--accent) !important; color:#fff; border-color:var(--accent) !important; }
+  #legend { position:absolute; left:10px; bottom:24px; background:#fffe; border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:12px; z-index:2; }
+  #legend i { display:inline-block; width:12px; height:12px; border-radius:2px; margin:0 4px 0 8px; vertical-align:-2px; }
+  #panel { position:absolute; right:10px; top:60px; width:320px; max-height:calc(100% - 80px); overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:12px; padding:14px; box-shadow:0 4px 16px #0003; z-index:3; display:none; }
+  #panel h3 { margin:0 0 8px; font-size:15px; }
+  #panel table { width:100%; border-collapse:collapse; }
+  #panel td { padding:5px 0; border-bottom:1px solid var(--line); vertical-align:top; }
+  #panel td:last-child { text-align:right; font-variant-numeric:tabular-nums; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:99px; color:#fff; font-size:12px; }
+  .note { color:var(--muted); font-size:12px; margin-top:8px; }
+  #msg { position:absolute; top:58px; left:50%; transform:translateX(-50%); background:#111c; color:#fff; padding:6px 12px; border-radius:99px; font-size:13px; z-index:2; display:none; }
+  .maplibregl-popup-content { font-size:13px; line-height:1.5; }
+  @media (max-width:640px) {
+    #panel { left:0; right:0; top:auto; bottom:0; width:auto; max-height:55%; border-radius:14px 14px 0 0; }
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="bar">
+  <b>재개발 지도</b>
+  <select id="mode">
+    <option value="age">노후도</option>
+    <option value="own">추정 소유자 수</option>
+    <option value="new">최근 신축</option>
+    <option value="zone">용도지역</option>
+  </select>
+  <button id="draw">구역 그리기</button>
+  <button id="done" style="display:none">계산</button>
+  <button id="clear" style="display:none">지우기</button>
+</div>
+<div id="msg"></div>
+<div id="legend"></div>
+<div id="panel"></div>
+<script>
+const AGING = 0.60, SMALL = 90;   // config.yaml 의 aging_threshold, small_parcel_m2 와 맞출 것
+const fc = f => ({ type: 'FeatureCollection', features: f });
+const $ = id => document.getElementById(id);
+const fmt = n => (n ?? 0).toLocaleString('ko-KR');
+const pct = x => isFinite(x) ? (x * 100).toFixed(1) + '%' : '–';
+let P = [], loaded = new Set(), dongs, pts = [], drawing = false;
+
+const ratio = e => ['interpolate', ['linear'], e, 0, '#3b82f6', 0.45, '#facc15', AGING, '#f97316', 0.85, '#b91c1c'];
+const ZONES = { '제1종전용주거지역':'#bbf7d0', '제2종전용주거지역':'#86efac', '제1종일반주거지역':'#fde68a', '제2종일반주거지역':'#fbbf24',
+  '제3종일반주거지역':'#d97706', '준주거지역':'#fb923c', '근린상업지역':'#fca5a5', '일반상업지역':'#f87171', '중심상업지역':'#dc2626',
+  '유통상업지역':'#e11d48', '준공업지역':'#a78bfa', '일반공업지역':'#7c3aed', '자연녹지지역':'#4ade80', '생산녹지지역':'#22c55e', '보전녹지지역':'#15803d' };
+const MODES = {
+  age:  { c: ['case', ['==', ['get', 'nb'], 0], '#d4d4d4', ratio(['/', ['get', 'no'], ['get', 'nb']])],
+          lg: [['#3b82f6', '0%'], ['#facc15', '45%'], ['#f97316', '60% 기준'], ['#b91c1c', '85%+'], ['#d4d4d4', '건물 없음']] },
+  own:  { c: ['interpolate', ['linear'], ['get', 'ol'], 0, '#e5e7eb', 1, '#c7d2fe', 5, '#818cf8', 20, '#4338ca', 100, '#1e1b4b'],
+          lg: [['#c7d2fe', '1'], ['#818cf8', '5'], ['#4338ca', '20'], ['#1e1b4b', '100+']] },
+  new:  { c: ['case', ['>', ['get', 'nn'], 0], '#dc2626', ['>', ['get', 'nb'], 0], '#e5e7eb', '#f5f5f5'],
+          lg: [['#dc2626', '최근 5년 신축 있음'], ['#e5e7eb', '없음']] },
+  zone: { c: ['match', ['get', 'z'], ...Object.entries(ZONES).flat(), '#d4d4d4'],
+          lg: Object.entries(ZONES).slice(0, 9).map(([k, v]) => [v, k.replace('지역', '')]) },
+};
+
+const map = new maplibregl.Map({
+  container: 'map', center: [127.02, 37.48], zoom: 12, doubleClickZoom: false,
+  style: { version: 8, sources: { base: { type: 'raster', tileSize: 256, attribution: '© OpenStreetMap © CARTO · 브이월드 · 건축HUB',
+    tiles: ['a', 'b', 'c'].map(s => `https://${s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png`) } },
+    layers: [{ id: 'base', type: 'raster', source: 'base' }] },
+});
+
+function msg(t) { $('msg').textContent = t; $('msg').style.display = t ? 'block' : 'none'; }
+
+function setMode(m) {
+  map.setPaintProperty('p-fill', 'fill-color', MODES[m].c);
+  $('legend').innerHTML = MODES[m].lg.map(([c, t]) => `<i style="background:${c}"></i>${t}`).join('');
+}
+
+async function load(bb) {  // bb=[w,s,e,n] 와 겹치는 동 필지 로드
+  const need = dongs.features.filter(f => { const b = f.properties.b;
+    return !loaded.has(f.properties.c) && b[0] < bb[2] && b[2] > bb[0] && b[1] < bb[3] && b[3] > bb[1]; });
+  if (!need.length) return;
+  msg(`필지 불러오는 중… (${need.length}개 동)`);
+  for (const f of need) {
+    loaded.add(f.properties.c);
+    try { P.push(...(await (await fetch(`data/${f.properties.c}.geojson`)).json()).features); } catch (e) { loaded.delete(f.properties.c); }
+  }
+  map.getSource('parcels').setData(fc(P)); msg('');
+}
+
+map.on('load', async () => {
+  dongs = await (await fetch('data/dongs.geojson')).json();
+  map.addSource('dongs', { type: 'geojson', data: dongs });
+  map.addSource('parcels', { type: 'geojson', data: fc([]) });
+  map.addSource('draw', { type: 'geojson', data: fc([]) });
+  map.addLayer({ id: 'd-fill', type: 'fill', source: 'dongs', maxzoom: 14.5,
+    paint: { 'fill-color': ['case', ['==', ['get', 'r'], null], '#bbb', ratio(['get', 'r'])], 'fill-opacity': 0.45 } });
+  map.addLayer({ id: 'p-fill', type: 'fill', source: 'parcels', minzoom: 14, paint: { 'fill-opacity': 0.75 } });
+  map.addLayer({ id: 'p-line', type: 'line', source: 'parcels', minzoom: 16, paint: { 'line-color': '#fff', 'line-width': 0.6 } });
+  map.addLayer({ id: 'd-line', type: 'line', source: 'dongs', paint: { 'line-color': '#374151', 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.6, 15, 1.6] } });
+  map.addLayer({ id: 'dr-fill', type: 'fill', source: 'draw', filter: ['==', '$type', 'Polygon'], paint: { 'fill-color': '#2563eb', 'fill-opacity': 0.12 } });
+  map.addLayer({ id: 'dr-line', type: 'line', source: 'draw', paint: { 'line-color': '#2563eb', 'line-width': 2.5, 'line-dasharray': [2, 1] } });
+  map.addLayer({ id: 'dr-pt', type: 'circle', source: 'draw', filter: ['==', '$type', 'Point'], paint: { 'circle-radius': 5, 'circle-color': '#2563eb', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+  setMode('age');
+  const b = dongs.features.map(f => f.properties.b);
+  if (b.length) map.fitBounds([[Math.min(...b.map(x => x[0])), Math.min(...b.map(x => x[1]))], [Math.max(...b.map(x => x[2])), Math.max(...b.map(x => x[3]))]], { padding: 30, duration: 0 });
+  map.on('moveend', () => { if (map.getZoom() >= 14) { const x = map.getBounds(); load([x.getWest(), x.getSouth(), x.getEast(), x.getNorth()]); } });
+});
+
+$('mode').onchange = e => setMode(e.target.value);
+
+// ---------- 팝업 ----------
+map.on('click', e => {
+  if (drawing) { pts.push([e.lngLat.lng, e.lngLat.lat]); renderDraw(); return; }
+  const p = map.queryRenderedFeatures(e.point, { layers: ['p-fill'] })[0]?.properties;
+  const d = map.queryRenderedFeatures(e.point, { layers: ['d-fill'] })[0]?.properties;
+  const html = p ? `<b>${p.j}</b> · ${p.z || '용도지역 미상'}<br>면적 ${fmt(p.ar)}㎡ · ${p.jm} · 공시지가 ${fmt(p.gj)}원/㎡<br>
+      건물 ${p.nb}동 (노후 ${p.no}, 미상 ${p.nu})${p.y0 ? ` · 준공 ${p.y0}${p.y1 !== p.y0 ? '–' + p.y1 : ''}` : ''}<br>
+      세대·가구 ${fmt(p.hh)} · 집합 호수 ${fmt(p.ho)}<br>
+      추정 소유자 ${p.pub ? '국공유' : p.ol === p.oh ? p.ol + '명' : `${p.ol}~${p.oh}명`}${p.oe ? ' <span style="color:#9ca3af">(대체값)</span>' : ''}
+      ${p.cg ? `<br>최근 소유권변동 ${p.cg}` : ''}`
+    : d ? `<b>${d.n}</b><br>노후도 ${pct(d.r)} (${fmt(d.no)}/${fmt(d.nb)}동)<br>필지 ${fmt(d.np)} · 추정 소유자 ${fmt(d.ol)}명` : null;
+  if (html) new maplibregl.Popup({ maxWidth: '280px' }).setLngLat(e.lngLat).setHTML(html).addTo(map);
+});
+
+// ---------- 구역 그리기 ----------
+function renderDraw(closed) {
+  const f = pts.map(c => ({ type: 'Feature', geometry: { type: 'Point', coordinates: c } }));
+  if (pts.length > 1) f.push({ type: 'Feature', geometry: closed ? { type: 'Polygon', coordinates: [[...pts, pts[0]]] } : { type: 'LineString', coordinates: pts } });
+  map.getSource('draw').setData(fc(f));
+}
+$('draw').onclick = () => {
+  drawing = !drawing; $('draw').classList.toggle('on', drawing);
+  $('done').style.display = $('clear').style.display = drawing ? '' : 'none';
+  if (drawing) { pts = []; renderDraw(); $('panel').style.display = 'none'; msg('지도를 눌러 꼭짓점을 찍고 [계산]'); } else msg('');
+};
+$('clear').onclick = () => { pts = []; renderDraw(); $('panel').style.display = 'none'; };
+$('done').onclick = async () => {
+  if (pts.length < 3) return msg('꼭짓점을 3개 이상 찍어주세요');
+  drawing = false; $('draw').classList.remove('on'); $('done').style.display = 'none';
+  renderDraw(true);
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  await load([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
+  showStats([...pts, pts[0]]);
+};
+
+function inside(x, y, poly) {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+}
+function areaM2(poly) {
+  const k = Math.cos(poly[0][1] * Math.PI / 180) * 111320, m = 110540;
+  let a = 0;
+  for (let i = 0; i < poly.length - 1; i++) a += poly[i][0] * k * poly[i + 1][1] * m - poly[i + 1][0] * k * poly[i][1] * m;
+  return Math.abs(a / 2);
+}
+
+function showStats(poly) {
+  const S = P.map(f => f.properties).filter(p => inside(p.cx, p.cy, poly));
+  const sum = (k, a = S) => a.reduce((s, p) => s + (p[k] || 0), 0);
+  const nb = sum('nb'), no = sum('no'), nu = sum('nu'), ha = areaM2(poly) / 1e4;
+  const dae = S.filter(p => p.jm === '대'), small = dae.filter(p => p.ar < SMALL).length;
+  const ar = sum('ar'), pubAr = sum('ar', S.filter(p => p.pub));
+  const lo = sum('ol'), hi = sum('oh'), est = S.filter(p => p.oe).length;
+  const zones = Object.entries(S.reduce((z, p) => (z[p.z || '미상'] = (z[p.z || '미상'] || 0) + p.ar, z), {}))
+    .sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k.replace('지역', '')} ${pct(v / ar)}`).join('<br>');
+  const r = no / nb, ok = r >= AGING;
+  const row = (k, v) => `<tr><td>${k}</td><td>${v}</td></tr>`;
+  $('panel').innerHTML = `<h3>선택 구역 분석</h3>
+    <div style="margin-bottom:10px">노후도 <b style="font-size:20px">${pct(r)}</b>
+      <span class="badge" style="background:var(--${ok ? 'ok' : 'bad'})">${ok ? '요건 충족' : '요건 미달'} (기준 ${pct(AGING)})</span></div>
+    <table>
+      ${row('구역 면적', `${fmt(Math.round(ha * 1e4))}㎡ (${ha.toFixed(2)}ha)`)}
+      ${row('필지 수', fmt(S.length))}
+      ${row('건축물 (주건축물)', `${fmt(nb)}동`)}
+      ${row('노후 · 미상', `${fmt(no)}동 · ${fmt(nu)}동`)}
+      ${row('미상 포함 시 노후도', pct((no + nu) / nb))}
+      ${row('노후 연면적 비율', pct(sum('oa') / sum('ta')))}
+      ${row('호수밀도', `${(nb / ha).toFixed(1)}동/ha`)}
+      ${row('과소필지 (대지 90㎡ 미만)', `${small} / ${dae.length} (${pct(small / dae.length)})`)}
+      ${row('추정 토지등소유자', lo === hi ? `${fmt(lo)}명` : `${fmt(lo)} ~ ${fmt(hi)}명`)}
+      ${row('현재 세대·가구 / 집합 호수', `${fmt(sum('hh'))} / ${fmt(sum('ho'))}`)}
+      ${row('최근 5년 신축', `${fmt(sum('nn'))}동`)}
+      ${row('국공유지 면적', pct(pubAr / ar))}
+      ${row('용도지역', zones || '–')}
+    </table>
+    <div class="note">소유자 수는 공개 집계 기반 추정치입니다. 한 사람이 여러 필지·호를 가진 경우를 구분하지 못해 실제보다 많게 나올 수 있습니다.
+      ${est ? `소유정보가 없는 ${est}필지는 집합 호수(또는 1명)로 대체했습니다.` : ''} 정비구역 지정 여부는 고시문으로 확인하세요.</div>`;
+  $('panel').style.display = 'block';
+}
+</script>
+</body>
+</html>
