@@ -1,9 +1,11 @@
 """원천데이터 수집 → data/raw/{시군구}/{법정동10자리}_{parcels|zones|owners|bldgs}.json
 25일 이내 받은 파일은 건너뛰므로 중간에 끊겨도 다시 돌리면 이어서 받음."""
-import os, sys, json, time
+import os, sys, json, time, gzip
 import requests
 from shapely.geometry import shape
-from .common import regions, RAW
+from .common import regions, RAW, ROOT
+
+SEED = ROOT / 'data' / 'seed'
 
 VW = 'https://api.vworld.kr/req/data'
 NED = 'https://api.vworld.kr/ned/data/getPossessionAttr'
@@ -64,9 +66,10 @@ def bh(sgg, bjd):  # 건축물대장 표제부
 
 
 def cached(path, fn):
-    if path.exists() and time.time() - path.stat().st_mtime < MAX_AGE:
+    seed = SEED / path.parent.name / (path.name + '.gz')  # 직접 올린 파일(seed.py)이 있으면 API 대신 사용
+    if path.exists() and time.time() - path.stat().st_mtime < MAX_AGE and not seed.exists():
         return json.loads(path.read_text(encoding='utf-8'))
-    data = fn()
+    data = json.loads(gzip.decompress(seed.read_bytes())) if seed.exists() else fn()
     path.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
     return data
 

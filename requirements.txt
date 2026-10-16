@@ -2,3 +2,6 @@ requests
 shapely>=2.0
 pyyaml
 pytest
+pyshp
+pyproj
+numpy

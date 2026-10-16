@@ -18,6 +18,13 @@
 - 토지소유정보 `getPossessionAttr` — 브이월드 NED
 - 건축물대장 표제부 `getBrTitleInfo` — 공공데이터포털 건축HUB
 
+## 브이월드 파일 업로드 (해외 IP 차단 우회)
+브이월드는 GitHub Actions(미국) 접속을 막음 → 국내에서 받은 파일을 `data/seed/`로 변환해 커밋하면 API 대신 사용.
+```
+python -m pipeline.seed 11650 연속지적도.zip 용도지역지구.zip 토지소유정보.csv
+```
+건축물대장(공공데이터포털)은 해외에서도 접속되므로 계속 API로 수집.
+
 ## 설정
 Secrets: `VWORLD_KEY`, `DATA_GO_KR_KEY`(Decoding 키), 필요시 `VWORLD_DOMAIN`(키 발급 시 등록한 도메인)
 Settings → Pages → Source: **GitHub Actions**

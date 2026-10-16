@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 jobs:
   diag:
-    runs-on: [self-hosted, korea]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: python3 -m venv ~/venv && ~/venv/bin/pip install -q requests && ~/venv/bin/python -m pipeline.diag > diag.log 2>&1; cat diag.log

@@ -3,7 +3,7 @@ name: pipeline
 on:
   push:                    # 코드·설정이 바뀌면 자동 실행 (지역은 저장소 변수 REGION, 없으면 test)
     branches: [main]
-    paths: ['pipeline/**', 'site/**', 'config.yaml', '.github/workflows/pipeline.yml', '!pipeline/diag.py']
+    paths: ['pipeline/**', 'site/**', 'config.yaml', 'data/seed/**', '.github/workflows/pipeline.yml', '!pipeline/diag.py']
   workflow_dispatch:
     inputs:
       region:
@@ -17,15 +17,14 @@ permissions:
   pages: write
   id-token: write
 
-concurrency: { group: pipeline, cancel-in-progress: false }
+concurrency: { group: pipeline, cancel-in-progress: true }
 
 jobs:
   build:
-    runs-on: [self-hosted, korea]           # 브이월드가 해외 IP 차단 → 오라클 서울 서버에서 실행
-    timeout-minutes: 1440
+    runs-on: ubuntu-latest                  # 브이월드는 해외 IP 차단 → data/seed(직접 올린 파일) 사용. 국내 서버 생기면 [self-hosted, korea]
+    timeout-minutes: 350
     env:
       REGION: ${{ inputs.region || vars.REGION || 'test' }}
-      REDEV_RAW: /home/runner/redev-raw     # 원천데이터는 서버 디스크에 유지 → 끊겨도 이어받음
     defaults:
       run: { shell: bash }
     steps:
