@@ -6,10 +6,10 @@ on:
   workflow_dispatch:
 jobs:
   diag:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, korea]
     steps:
       - uses: actions/checkout@v4
-      - run: pip install requests && python -m pipeline.diag > diag.log 2>&1; cat diag.log
+      - run: python3 -m venv ~/venv && ~/venv/bin/pip install -q requests && ~/venv/bin/python -m pipeline.diag > diag.log 2>&1; cat diag.log
         env:
           VWORLD_KEY: ${{ secrets.VWORLD_KEY }}
           VWORLD_DOMAIN: ${{ secrets.VWORLD_DOMAIN }}

@@ -21,22 +21,22 @@ concurrency: { group: pipeline, cancel-in-progress: false }
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 350
+    runs-on: [self-hosted, korea]           # 브이월드가 해외 IP 차단 → 오라클 서울 서버에서 실행
+    timeout-minutes: 1440
     env:
       REGION: ${{ inputs.region || vars.REGION || 'test' }}
+      REDEV_RAW: /home/runner/redev-raw     # 원천데이터는 서버 디스크에 유지 → 끊겨도 이어받음
+    defaults:
+      run: { shell: bash }
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.12', cache: pip }
-      - run: pip install -r requirements.txt && python -m pytest -q tests
-      - uses: actions/cache@v4              # 원천데이터 캐시 → 끊겨도 다음 실행에서 이어받음
-        with:
-          path: data/raw
-          key: raw-${{ github.run_id }}
-          restore-keys: raw-
+      - name: setup
+        run: |
+          python3 -m venv ~/venv
+          ~/venv/bin/pip install -q -r requirements.txt
+          echo "$HOME/venv/bin" >> $GITHUB_PATH
+      - run: python -m pytest -q tests
       - name: fetch
-        shell: bash
         run: python -m pipeline.fetch "$REGION" 2>&1 | tee fetch.log; exit ${PIPESTATUS[0]}
         env:
           VWORLD_KEY: ${{ secrets.VWORLD_KEY }}
@@ -44,7 +44,6 @@ jobs:
           DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
       - name: build
         if: always()                        # 수집이 일부 실패해도 받은 동까지는 지도에 반영
-        shell: bash
         run: python -m pipeline.build "$REGION" 2>&1 | tee build.log; exit ${PIPESTATUS[0]}
       - name: report                        # 로그 끝부분을 annotation으로 남김 (로그인 없이 API로 조회 가능)
         if: always()

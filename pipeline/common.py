@@ -1,9 +1,11 @@
+import os
 from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 CFG = yaml.safe_load((ROOT / 'config.yaml').read_text(encoding='utf-8'))
-RAW, OUT = ROOT / 'data' / 'raw', ROOT / 'site' / 'data'
+RAW = Path(os.environ.get('REDEV_RAW') or ROOT / 'data' / 'raw')  # 서버에선 저장소 밖에 두어 실행 간 유지
+OUT = ROOT / 'site' / 'data'
 
 
 def regions(arg):
