@@ -42,6 +42,7 @@
     <option value="new">최근 신축</option>
     <option value="zone">용도지역</option>
   </select>
+  <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="rz" checked>정비구역</label>
   <button id="draw">구역 그리기</button>
   <button id="done" style="display:none">계산</button>
   <button id="clear" style="display:none">지우기</button>
@@ -108,6 +109,11 @@ map.on('load', async () => {
   map.addLayer({ id: 'p-fill', type: 'fill', source: 'parcels', minzoom: 14, paint: { 'fill-opacity': 0.75 } });
   map.addLayer({ id: 'p-line', type: 'line', source: 'parcels', minzoom: 16, paint: { 'line-color': '#fff', 'line-width': 0.6 } });
   map.addLayer({ id: 'd-line', type: 'line', source: 'dongs', paint: { 'line-color': '#374151', 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.6, 15, 1.6] } });
+  try {  // 정비 관련 구역 (브이월드 UD210 레이어)
+    map.addSource('redev', { type: 'geojson', data: await (await fetch('data/redev.geojson')).json() });
+    map.addLayer({ id: 'r-fill', type: 'fill', source: 'redev', paint: { 'fill-color': '#7c3aed', 'fill-opacity': 0.06 } });
+    map.addLayer({ id: 'r-line', type: 'line', source: 'redev', paint: { 'line-color': '#7c3aed', 'line-width': 2, 'line-dasharray': [3, 2] } });
+  } catch (e) { $('rz').parentElement.style.display = 'none'; }
   map.addLayer({ id: 'dr-fill', type: 'fill', source: 'draw', filter: ['==', '$type', 'Polygon'], paint: { 'fill-color': '#2563eb', 'fill-opacity': 0.12 } });
   map.addLayer({ id: 'dr-line', type: 'line', source: 'draw', paint: { 'line-color': '#2563eb', 'line-width': 2.5, 'line-dasharray': [2, 1] } });
   map.addLayer({ id: 'dr-pt', type: 'circle', source: 'draw', filter: ['==', '$type', 'Point'], paint: { 'circle-radius': 5, 'circle-color': '#2563eb', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
@@ -118,6 +124,9 @@ map.on('load', async () => {
 });
 
 $('mode').onchange = e => setMode(e.target.value);
+$('rz').onchange = e => ['r-fill', 'r-line'].forEach(l => map.getLayer(l) && map.setLayoutProperty(l, 'visibility', e.target.checked ? 'visible' : 'none'));
+const zoneInfo = pt => map.getLayer('r-fill') ? map.queryRenderedFeatures(pt, { layers: ['r-fill'] }).map(f => f.properties)
+  .map(z => `<br><span style="color:#7c3aed">■ 정비 관련 구역 ${z.cd}${z.nm ? ' · ' + z.nm : ''}${z.dt ? ' · 고시 ' + z.dt.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : ''}</span>`).join('') : '';
 
 // ---------- 팝업 ----------
 map.on('click', e => {
@@ -129,8 +138,10 @@ map.on('click', e => {
       세대·가구 ${fmt(p.hh)} · 집합 호수 ${fmt(p.ho)}<br>
       추정 소유자 ${p.pub ? '국공유' : p.ol === p.oh ? p.ol + '명' : `${p.ol}~${p.oh}명`}${p.oe ? ' <span style="color:#9ca3af">(대체값)</span>' : ''}
       ${p.cg ? `<br>최근 소유권변동 ${p.cg}` : ''}`
+    + zoneInfo(e.point)
     : d ? `<b>${d.n}</b><br>노후도 ${pct(d.r)} (${fmt(d.no)}/${fmt(d.nb)}동)<br>필지 ${fmt(d.np)} · 추정 소유자 ${fmt(d.ol)}명` : null;
-  if (html) new maplibregl.Popup({ maxWidth: '280px' }).setLngLat(e.lngLat).setHTML(html).addTo(map);
+  const html2 = html || (zoneInfo(e.point) ? zoneInfo(e.point).slice(4) : null);
+  if (html2) new maplibregl.Popup({ maxWidth: '280px' }).setLngLat(e.lngLat).setHTML(html2).addTo(map);
 });
 
 // ---------- 구역 그리기 ----------

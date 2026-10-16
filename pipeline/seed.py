@@ -11,10 +11,8 @@ import shapefile
 from pyproj import CRS, Transformer
 from shapely.geometry import shape, mapping
 from shapely.ops import unary_union
-from shapely import STRtree, set_precision, transform
-from .common import ROOT
-
-SEED = ROOT / 'data' / 'seed'
+from shapely import STRtree, set_precision, transform, make_valid
+from .common import SEED
 OWN = {'pnu': ['고유번호', 'pnu'], 'lndcgrCodeNm': ['지목명', '지목'], 'lndpclAr': ['토지면적', '면적'],
        'pblntfPclnd': ['공시지가'], 'posesnSeCodeNm': ['소유구분명', '소유구분'], 'ownshipChgDe': ['소유권변동일자', '변동일자'],
        'cnrsPsnCo': ['공유인수'], 'cnrsPsnSn': ['공유인일련번호', '일련번호'], 'buldDongNm': ['건물동명', '동명'],
@@ -36,7 +34,7 @@ def read_shp(path):
     t = Transformer.from_crs(CRS.from_wkt(prj), 4326, always_xy=True)
     tf = lambda xy: np.column_stack(t.transform(xy[:, 0], xy[:, 1]))
     names = [f[0] for f in r.fields[1:]]
-    return names, [(transform(shape(s.shape.__geo_interface__), tf), dict(zip(names, s.record))) for s in r.iterShapeRecords()]
+    return names, [(make_valid(transform(shape(s.shape.__geo_interface__), tf)), dict(zip(names, s.record))) for s in r.iterShapeRecords()]
 
 
 def read_owners(path, sgg):
@@ -68,14 +66,19 @@ def main(sgg, *files):
             owners += read_owners(f, sgg)
             continue
         names, rows = read_shp(f)
-        if any(n.upper() == 'PNU' for n in names):
+        if 'MNUM' in names and 'UD210' in Path(f).name.upper() + ''.join(names):  # 정비구역 계열 (서울 전체 1파일)
+            save(SEED / 'redev.json.gz', [dict(type='Feature', geometry=mapping(set_precision(g.simplify(2e-6), 1e-6)),
+                                               properties=dict(cd=p['MNUM'][20:26], dt=p['NTFDATE'], nm=p['REMARK'] or p['ALIAS'], sgg=p['COL_ADM_SE']))
+                                          for g, p in rows])
+        elif any(n.upper() == 'PNU' for n in names):
             k = {n.upper(): n for n in names}
-            parcels += [(g, str(p[k['PNU']]), str(p.get(k.get('JIBUN', ''), ''))) for g, p in rows if str(p[k['PNU']]).startswith(sgg)]
+            parcels += [(g, str(p[k['PNU']]), str(p.get(k.get('JIBUN', ''), ''))) for g, p in rows if str(p[k['PNU']]).startswith(sgg) and not g.is_empty]
         else:
             nm = next((n for n in names if n.upper() in ('DGM_NM', 'UNAME', 'PRPOS_AREA_DSTRC_NM')), names[-1])
             zones += [(g, str(p[nm])) for g, p in rows]
         print(f, len(rows), names, flush=True)
 
+    if not parcels: return
     by = defaultdict(list)
     for g, pnu, jb in parcels: by[pnu[:10]].append((g, pnu, jb))
     own = defaultdict(list)
@@ -84,13 +87,13 @@ def main(sgg, *files):
     tree = STRtree([g for g, _ in zones]) if zones else None
     d, dongs = SEED / sgg, []
     for p10, ps in sorted(by.items()):
-        u = unary_union([g.buffer(0) for g, _, _ in ps])
+        u = unary_union([g for g, _, _ in ps]).buffer(0)
         dongs.append(dict(type='Feature', geometry=mapping(set_precision(u.simplify(1e-5), 1e-6)),
                           properties=dict(emd_cd=p10[:8], full_nm=nm.get(p10, ''), emd_kor_nm=nm.get(p10, '').split(' ')[-1])))
         save(d / f'{p10}_parcels.json.gz', [dict(type='Feature', geometry=mapping(set_precision(g, 1e-7)), properties=dict(pnu=pnu, jibun=jb))
                                             for g, pnu, jb in ps])
         zi = tree.query(u, predicate='intersects') if tree else []
-        save(d / f'{p10}_zones.json.gz', [dict(type='Feature', geometry=mapping(set_precision(zones[i][0].intersection(u.envelope), 1e-6)),
+        if zones: save(d / f'{p10}_zones.json.gz', [dict(type='Feature', geometry=mapping(set_precision(zones[i][0].intersection(u.envelope), 1e-6)),
                                                properties=dict(uname=zones[i][1])) for i in zi])
         if owners: save(d / f'{p10}_owners.json.gz', own.get(p10, []))
         print(p10, nm.get(p10, ''), f'필지 {len(ps)}, 용도지역 {len(zi)}, 소유 {len(own.get(p10, []))}', flush=True)

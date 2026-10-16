@@ -5,7 +5,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 CFG = yaml.safe_load((ROOT / 'config.yaml').read_text(encoding='utf-8'))
 RAW = Path(os.environ.get('REDEV_RAW') or ROOT / 'data' / 'raw')  # 서버에선 저장소 밖에 두어 실행 간 유지
-OUT = ROOT / 'site' / 'data'
+OUT, SEED = ROOT / 'site' / 'data', ROOT / 'data' / 'seed'
 
 
 def regions(arg):

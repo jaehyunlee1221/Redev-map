@@ -1,9 +1,9 @@
 """data/raw → site/data/{법정동}.geojson (필지별 지표) + site/data/dongs.geojson (동 경계·요약)"""
-import sys, json, math, re
+import sys, json, math, re, gzip
 from collections import defaultdict
 from shapely.geometry import shape, mapping
 from shapely import STRtree, set_precision
-from .common import regions, RAW, OUT
+from .common import regions, RAW, OUT, SEED
 from .metrics import agg_bldgs, agg_owners, pnu_of
 
 load = lambda p: json.loads(p.read_text(encoding='utf-8')) if p.exists() else []
@@ -24,6 +24,7 @@ def build_dong(sgg, p10):
     feats = []
     for f in load(d / f'{p10}_parcels.json'):
         pnu, g = f['properties']['pnu'], shape(f['geometry'])
+        if g.is_empty: continue
         pt = g.representative_point()
         z = next((zs[i][1] for i in tree.query(pt, predicate='within')), '') if zs else ''
         jb = f['properties'].get('jibun', '')
@@ -50,11 +51,16 @@ def main(arg):
             p10 = pr['emd_cd'] + '00'
             if not (RAW / sgg / f'{p10}_parcels.json').exists(): continue
             sm = build_dong(sgg, p10)
+            if not (pr.get('full_nm') or pr.get('emd_kor_nm')):  # 소유정보 없이 올린 경우 → 건축물대장 주소로 동 이름
+                pr['full_nm'] = next((' '.join(b['platPlc'].split()[:3]) for b in load(RAW / sgg / f'{p10}_bldgs.json') if b.get('platPlc')), p10)
             dongs[p10] = dict(type='Feature', geometry=mapping(set_precision(g.simplify(1e-5), 1e-6)),
                               properties=dict(c=p10, n=pr.get('full_nm') or pr.get('emd_kor_nm', ''),
                                               b=[round(v, 5) for v in g.bounds],
                                               r=round(sm['no'] / sm['nb'], 3) if sm['nb'] else None, **sm))
             print(p10, dongs[p10]['properties']['n'], sm, flush=True)
+    if (SEED / 'redev.json.gz').exists():  # 정비구역 오버레이
+        (OUT / 'redev.geojson').write_text(json.dumps(dict(type='FeatureCollection', features=json.loads(gzip.decompress(
+            (SEED / 'redev.json.gz').read_bytes()))), ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     path.write_text(json.dumps(dict(type='FeatureCollection', features=list(dongs.values())),
                                ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
 

@@ -3,9 +3,7 @@
 import os, sys, json, time, gzip
 import requests
 from shapely.geometry import shape
-from .common import regions, RAW, ROOT
-
-SEED = ROOT / 'data' / 'seed'
+from .common import regions, RAW, SEED
 
 VW = 'https://api.vworld.kr/req/data'
 NED = 'https://api.vworld.kr/ned/data/getPossessionAttr'
@@ -14,6 +12,7 @@ VK, DK = os.environ['VWORLD_KEY'], os.environ['DATA_GO_KR_KEY']
 DOM = os.environ.get('VWORLD_DOMAIN', '')
 MAX_AGE = 25 * 86400
 ERR = []
+VW_DOWN = []  # 브이월드 접속 불가(해외 IP 차단) 확인되면 이후 호출 생략
 
 
 def get(url, **p):
@@ -23,6 +22,7 @@ def get(url, **p):
             r.raise_for_status()
             break
         except requests.RequestException:
+            if 'vworld' in url and i == 1: VW_DOWN.append(1); raise  # 브이월드는 빨리 포기
             if i == 4: raise
             time.sleep(3 * 2 ** i)
     try:
@@ -90,11 +90,13 @@ def main(arg):
                     'owners': lambda: ned(p10),
                     'bldgs': lambda: bh(sgg, emd[5:] + '00')}
             for k, fn in jobs.items():  # 하나 실패해도 나머지 계속
+                if VW_DOWN and k != 'bldgs' and not (SEED / sgg / f'{p10}_{k}.json.gz').exists(): continue
                 try:
                     print(sgg, emd, f['properties'].get('emd_kor_nm'), k, len(cached(d / f'{p10}_{k}.json', fn)), flush=True)
                 except Exception as e:
                     ERR.append(f'{p10} {k}: {e}')
                     print('ERROR', ERR[-1], flush=True)
+    if VW_DOWN: print('::warning::브이월드 접속 불가(해외 IP 차단) → seed 없는 지적도·용도지역·소유정보는 건너뜀', flush=True)
     if ERR: sys.exit(f'{len(ERR)}건 실패\n' + '\n'.join(ERR[:20]))
 
 

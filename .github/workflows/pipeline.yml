@@ -1,14 +1,14 @@
 name: pipeline
 
 on:
-  push:                    # 코드·설정이 바뀌면 자동 실행 (지역은 저장소 변수 REGION, 없으면 test)
+  push:                    # 코드·설정이 바뀌면 자동 실행 (지역은 저장소 변수 REGION, 없으면 seeded)
     branches: [main]
     paths: ['pipeline/**', 'site/**', 'config.yaml', 'data/seed/**', '.github/workflows/pipeline.yml', '!pipeline/diag.py']
   workflow_dispatch:
     inputs:
       region:
         description: 'config.yaml 지역 키 또는 시군구코드 (예: test / seoul / seoul,seongnam / 11650)'
-        default: test
+        default: seeded
   schedule:
     - cron: '0 18 1 * *'   # 매월 2일 03:00 KST
 
@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest                  # 브이월드는 해외 IP 차단 → data/seed(직접 올린 파일) 사용. 국내 서버 생기면 [self-hosted, korea]
     timeout-minutes: 350
     env:
-      REGION: ${{ inputs.region || vars.REGION || 'test' }}
+      REGION: ${{ inputs.region || vars.REGION || 'seeded' }}
     defaults:
       run: { shell: bash }
     steps:
