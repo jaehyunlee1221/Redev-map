@@ -39,6 +39,5 @@ def test_seed(tmp_path, monkeypatch):
     x, y = p[0]['geometry']['coordinates'][0][0]
     assert len(p) == 2 and 126.9 < x < 127.2 and 37.3 < y < 37.6          # WGS84 변환 확인
     assert load('1165010100_zones.json.gz')[0]['properties']['uname'] == '제2종일반주거지역'
-    o = load('1165010100_owners.json.gz')
-    assert o == [dict(pnu='1165010100100010000', lndcgrCodeNm='대', lndpclAr='400', posesnSeCodeNm='개인',
-                      cnrsPsnCo='2', cnrsPsnSn='1', ldCodeNm='서울특별시 서초구 방배동')]
+    o = load('1165010100_owners.json.gz')['1165010100100010000']
+    assert (o['ol'], o['oh'], o['ar'], o['jm']) == (1, 2, 400.0, '대')   # 원본 행 대신 필지별 집계만 저장

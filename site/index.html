@@ -42,7 +42,7 @@
     <option value="new">최근 신축</option>
     <option value="zone">용도지역</option>
   </select>
-  <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="rz" checked>정비구역</label>
+  <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="rz" checked>건축규제구역</label>
   <button id="draw">구역 그리기</button>
   <button id="done" style="display:none">계산</button>
   <button id="clear" style="display:none">지우기</button>
@@ -109,7 +109,7 @@ map.on('load', async () => {
   map.addLayer({ id: 'p-fill', type: 'fill', source: 'parcels', minzoom: 14, paint: { 'fill-opacity': 0.75 } });
   map.addLayer({ id: 'p-line', type: 'line', source: 'parcels', minzoom: 16, paint: { 'line-color': '#fff', 'line-width': 0.6 } });
   map.addLayer({ id: 'd-line', type: 'line', source: 'dongs', paint: { 'line-color': '#374151', 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.6, 15, 1.6] } });
-  try {  // 정비 관련 구역 (브이월드 UD210 레이어)
+  try {  // 건축규제 구역 (브이월드 UD210: 건축허가 제한·높이 지정 등)
     map.addSource('redev', { type: 'geojson', data: await (await fetch('data/redev.geojson')).json() });
     map.addLayer({ id: 'r-fill', type: 'fill', source: 'redev', paint: { 'fill-color': '#7c3aed', 'fill-opacity': 0.06 } });
     map.addLayer({ id: 'r-line', type: 'line', source: 'redev', paint: { 'line-color': '#7c3aed', 'line-width': 2, 'line-dasharray': [3, 2] } });
@@ -126,7 +126,7 @@ map.on('load', async () => {
 $('mode').onchange = e => setMode(e.target.value);
 $('rz').onchange = e => ['r-fill', 'r-line'].forEach(l => map.getLayer(l) && map.setLayoutProperty(l, 'visibility', e.target.checked ? 'visible' : 'none'));
 const zoneInfo = pt => map.getLayer('r-fill') ? map.queryRenderedFeatures(pt, { layers: ['r-fill'] }).map(f => f.properties)
-  .map(z => `<br><span style="color:#7c3aed">■ 정비 관련 구역 ${z.cd}${z.nm ? ' · ' + z.nm : ''}${z.dt ? ' · 고시 ' + z.dt.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : ''}</span>`).join('') : '';
+  .map(z => `<br><span style="color:#7c3aed">■ 건축규제 구역 ${({UDX100: '건축허가 제한', UDX200: '건축선·높이 등', UDX999: '기타'})[z.cd] || z.cd}${z.nm ? ' · ' + z.nm : ''}${z.dt ? ' · 고시 ' + z.dt.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : ''}</span>`).join('') : '';
 
 // ---------- 팝업 ----------
 map.on('click', e => {

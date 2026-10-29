@@ -1,34 +1,34 @@
-"""원천데이터 수집 → data/raw/{시군구}/{법정동10자리}_{parcels|zones|owners|bldgs}.json
-25일 이내 받은 파일은 건너뛰므로 중간에 끊겨도 다시 돌리면 이어서 받음."""
-import os, sys, json, time, gzip
+"""원천데이터 수집. 동 단위로 저장하고 기한 내 받은 건 건너뛰므로, 끊겨도 다시 돌리면 이어받음.
+  PC(국내 IP)   python -m pipeline.fetch seoul+seongnam vworld  → data/seed/{시군구}/*.json.gz (커밋해서 올림)
+                 python -m pipeline.fetch test check            → 각 API가 되는지 점검만
+  GitHub        python -m pipeline.fetch seeded bldgs          → data/raw/{시군구}/*_bldgs.json"""
+import os, sys, time
+import numpy as np
 import requests
-from shapely.geometry import shape
-from .common import regions, RAW, SEED
+import shapely
+from shapely.geometry import shape, mapping
+from .common import regions, RAW, SEED, rd, wr
+from .metrics import agg_owners
 
 VW = 'https://api.vworld.kr/req/data'
 NED = 'https://api.vworld.kr/ned/data/getPossessionAttr'
 BH = 'https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo'
-VK, DK = os.environ['VWORLD_KEY'], os.environ['DATA_GO_KR_KEY']
-DOM = os.environ.get('VWORLD_DOMAIN', '')
-MAX_AGE = 25 * 86400
+VK, DK, DOM = (os.environ.get(k, '') for k in ('VWORLD_KEY', 'DATA_GO_KR_KEY', 'VWORLD_DOMAIN'))
+DAYS = dict(dongs=90, parcels=90, zones=90, owners=30, bldgs=25)  # 이 기간 안에 받은 파일은 건너뜀
 ERR = []
-VW_DOWN = []  # 브이월드 접속 불가(해외 IP 차단) 확인되면 이후 호출 생략
 
 
 def get(url, **p):
-    for i in range(5):
+    for i in range(4):
         try:
             r = requests.get(url, params=p, timeout=90)
             r.raise_for_status()
-            break
+            return r.json()
+        except ValueError:
+            raise RuntimeError(f'JSON 아님: {r.text[:300]}')
         except requests.RequestException:
-            if 'vworld' in url and i == 1: VW_DOWN.append(1); raise  # 브이월드는 빨리 포기
-            if i == 4: raise
+            if i == 3: raise
             time.sleep(3 * 2 ** i)
-    try:
-        return r.json()
-    except ValueError:
-        raise RuntimeError(f'{url} 응답 오류: {r.text[:300]}')
 
 
 def vw(layer, **flt):  # 브이월드 2D 데이터 (연속지적도, 용도지역, 읍면동)
@@ -43,11 +43,12 @@ def vw(layer, **flt):  # 브이월드 2D 데이터 (연속지적도, 용도지�
         page += 1
 
 
-def ned(pnu):  # 토지소유정보 (법정동 단위 PNU 앞자리로 조회)
+def ned(pnu):  # 토지소유정보 (PNU 앞자리로 조회)
     out, page = [], 1
     while True:
-        j = get(NED, key=VK, domain=DOM, pnu=pnu, format='json', numOfRows=1000, pageNo=page)['possessions']
-        if 'field' not in j and 'totalCount' not in j: raise RuntimeError(f'토지소유정보 {pnu}: {j}')
+        j = get(NED, key=VK, domain=DOM, pnu=pnu, format='json', numOfRows=1000, pageNo=page)
+        j = j.get('possessions', j)
+        if 'field' not in j and 'totalCount' not in j: raise RuntimeError(f'토지소유정보 {pnu}: {str(j)[:300]}')
         rows = j.get('field') or []
         out += rows
         if not rows or page * 1000 >= int(j['totalCount']): return out
@@ -65,40 +66,77 @@ def bh(sgg, bjd):  # 건축물대장 표제부
         page += 1
 
 
-def cached(path, fn):
-    seed = SEED / path.parent.name / (path.name + '.gz')  # 직접 올린 파일(seed.py)이 있으면 API 대신 사용
-    if path.exists() and time.time() - path.stat().st_mtime < MAX_AGE and not seed.exists():
-        return json.loads(path.read_text(encoding='utf-8'))
-    data = json.loads(gzip.decompress(seed.read_bytes())) if seed.exists() else fn()
-    path.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
-    return data
+def feat(f, nd=7, **props):  # 좌표 반올림 + 필요한 속성만 남김
+    g = shapely.transform(shape(f['geometry']), lambda c: np.round(c, nd))
+    return dict(type='Feature', geometry=mapping(g), properties=props)
 
 
-def main(arg):
+def owners(p10):  # 원본 행은 저장하지 않고 필지별 집계만 남김
+    rows = {}
+    for r in ned(p10): rows.setdefault(r['pnu'], []).append(r)
+    return {pnu: agg_owners(rs) for pnu, rs in rows.items()}
+
+
+def run(path, fn, days):
+    if path.exists() and time.time() - path.stat().st_mtime < days * 86400: return '-'
+    try:
+        data = fn()
+        wr(path, data)
+        return len(data)
+    except Exception as e:
+        ERR.append(f'{path.name}: {e}')
+        return 'ERR'
+
+
+def check(sgg):
+    """API별로 한두 건만 불러보고 결과 출력"""
+    def t(name, fn):
+        try: print(f'[OK] {name}: {fn()}', flush=True)
+        except Exception as e: print(f'[실패] {name}: {str(e)[:300]}', flush=True)
+    ds = []
+    t('읍면동 목록', lambda: len(ds.extend(vw('LT_C_ADEMD_INFO', attrFilter=f'emd_cd:like:{sgg}')) or ds))
+    if not ds: return
+    p10 = ds[0]['properties']['emd_cd'] + '00'
+    box = 'BOX({},{},{},{})'.format(*shape(ds[0]['geometry']).bounds)
+    one = get(VW, service='data', request='GetFeature', data='LP_PA_CBND_BUBUN', key=VK, domain=DOM, format='json',
+              size=1, attrFilter=f'pnu:like:{p10}')['response']
+    t(f'연속지적도 ({p10})', lambda: f"{one['status']}, 총 {one.get('record', {}).get('total')}건")
+    t('용도지역', lambda: f"{len(vw('LT_C_UQ111', geomFilter=box))}개 구역")
+    pnu = one['result']['featureCollection']['features'][0]['properties']['pnu'] if one['status'] == 'OK' else p10
+    for q in (p10, pnu):
+        t(f'토지소유정보 pnu={q}', lambda: (lambda j: f"총 {j.get('totalCount')}건, 예시 {(j.get('field') or [{}])[0]}")(
+            get(NED, key=VK, domain=DOM, pnu=q, format='json', numOfRows=1, pageNo=1).get('possessions', {})))
+    if DK: t('건축물대장', lambda: f"{len(bh(sgg, p10[5:]))}건")
+
+
+def main(arg, mode):
+    if os.name == 'nt':  # 윈도우: 수집 중 절전 방지
+        import ctypes; ctypes.windll.kernel32.SetThreadExecutionState(0x80000001)
+    if mode == 'check': return check(regions(arg)[0])
     for sgg in regions(arg):
-        d = RAW / sgg
-        d.mkdir(parents=True, exist_ok=True)
-        dongs = cached(d / 'dongs.json', lambda: [f for f in vw('LT_C_ADEMD_INFO', attrFilter=f'emd_cd:like:{sgg}')
-                                                  if f['properties']['emd_cd'].startswith(sgg)])
-        print(sgg, f'{len(dongs)}개 동', flush=True)
-        for f in dongs:
+        if mode == 'vworld':
+            run(SEED / sgg / 'dongs.json.gz', lambda: [feat(f, 6, **{k: f['properties'].get(k, '') for k in ('emd_cd', 'full_nm', 'emd_kor_nm')})
+                                                       for f in vw('LT_C_ADEMD_INFO', attrFilter=f'emd_cd:like:{sgg}')
+                                                       if f['properties']['emd_cd'].startswith(sgg)], DAYS['dongs'])
+        ds = rd(sgg, 'dongs.json') or []
+        print(sgg, f'{len(ds)}개 동', flush=True)
+        for f in ds:
             emd = f['properties']['emd_cd']
             p10, box = emd + '00', 'BOX({},{},{},{})'.format(*shape(f['geometry']).bounds)
-            jobs = {'parcels': lambda: [x for x in vw('LP_PA_CBND_BUBUN', attrFilter=f'pnu:like:{p10}')
-                                        if x['properties']['pnu'].startswith(p10)],
-                    'zones': lambda: vw('LT_C_UQ111', geomFilter=box),
-                    'owners': lambda: ned(p10),
-                    'bldgs': lambda: bh(sgg, emd[5:] + '00')}
-            for k, fn in jobs.items():  # 하나 실패해도 나머지 계속
-                if VW_DOWN and k != 'bldgs' and not (SEED / sgg / f'{p10}_{k}.json.gz').exists(): continue
-                try:
-                    print(sgg, emd, f['properties'].get('emd_kor_nm'), k, len(cached(d / f'{p10}_{k}.json', fn)), flush=True)
-                except Exception as e:
-                    ERR.append(f'{p10} {k}: {e}')
-                    print('ERROR', ERR[-1], flush=True)
-    if VW_DOWN: print('::warning::브이월드 접속 불가(해외 IP 차단) → seed 없는 지적도·용도지역·소유정보는 건너뜀', flush=True)
-    if ERR: sys.exit(f'{len(ERR)}건 실패\n' + '\n'.join(ERR[:20]))
+            if mode == 'vworld':
+                base, ext = SEED / sgg, '.json.gz'
+                jobs = dict(parcels=lambda: [feat(x, pnu=x['properties']['pnu'], jibun=x['properties'].get('jibun', ''))
+                                             for x in vw('LP_PA_CBND_BUBUN', attrFilter=f'pnu:like:{p10}')
+                                             if x['properties']['pnu'].startswith(p10)],
+                            zones=lambda: [feat(x, 6, uname=x['properties'].get('uname', '')) for x in vw('LT_C_UQ111', geomFilter=box)],
+                            owners=lambda: owners(p10))
+            else:
+                base, ext = RAW / sgg, '.json'
+                jobs = dict(bldgs=lambda: bh(sgg, emd[5:] + '00'))
+            res = {k: run(base / f'{p10}_{k}{ext}', fn, DAYS[k]) for k, fn in jobs.items()}
+            print(sgg, emd, f['properties'].get('emd_kor_nm', ''), res, flush=True)
+    if ERR: sys.exit(f'{len(ERR)}건 실패 (다시 실행하면 실패한 것만 다시 받음)\n' + '\n'.join(ERR[:20]))
 
 
 if __name__ == '__main__':
-    main(sys.argv[1] if len(sys.argv) > 1 else 'test')
+    main(sys.argv[1] if len(sys.argv) > 1 else 'test', sys.argv[2] if len(sys.argv) > 2 else 'vworld')

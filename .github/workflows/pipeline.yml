@@ -3,7 +3,7 @@ name: pipeline
 on:
   push:                    # 코드·설정이 바뀌면 자동 실행 (지역은 저장소 변수 REGION, 없으면 seeded)
     branches: [main]
-    paths: ['pipeline/**', 'site/**', 'config.yaml', 'data/seed/**', '.github/workflows/pipeline.yml', '!pipeline/diag.py']
+    paths: ['pipeline/**', 'site/**', 'config.yaml', 'data/seed/**', '.github/workflows/pipeline.yml']
   workflow_dispatch:
     inputs:
       region:
@@ -21,7 +21,7 @@ concurrency: { group: pipeline, cancel-in-progress: true }
 
 jobs:
   build:
-    runs-on: ubuntu-latest                  # 브이월드는 해외 IP 차단 → data/seed(직접 올린 파일) 사용. 국내 서버 생기면 [self-hosted, korea]
+    runs-on: ubuntu-latest                  # 브이월드(해외 IP 차단)는 PC에서 받아 data/seed로 올림. 여기선 건축물대장만 수집
     timeout-minutes: 350
     env:
       REGION: ${{ inputs.region || vars.REGION || 'seeded' }}
@@ -35,12 +35,15 @@ jobs:
           ~/venv/bin/pip install -q -r requirements.txt
           echo "$HOME/venv/bin" >> $GITHUB_PATH
       - run: python -m pytest -q tests
+      - uses: actions/cache/restore@v4      # 건축물대장 캐시 (25일 이내 받은 동은 건너뜀)
+        with: { path: data/raw, key: 'raw-${{ github.run_id }}', restore-keys: raw- }
       - name: fetch
-        run: python -m pipeline.fetch "$REGION" 2>&1 | tee fetch.log; exit ${PIPESTATUS[0]}
+        run: python -m pipeline.fetch "$REGION" bldgs 2>&1 | tee fetch.log; exit ${PIPESTATUS[0]}
         env:
-          VWORLD_KEY: ${{ secrets.VWORLD_KEY }}
-          VWORLD_DOMAIN: ${{ secrets.VWORLD_DOMAIN }}
           DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+      - uses: actions/cache/save@v4         # 일부 실패해도 받은 건 저장 → 다음 실행에서 이어받음
+        if: always()
+        with: { path: data/raw, key: 'raw-${{ github.run_id }}' }
       - name: build
         if: always()                        # 수집이 일부 실패해도 받은 동까지는 지도에 반영
         run: python -m pipeline.build "$REGION" 2>&1 | tee build.log; exit ${PIPESTATUS[0]}

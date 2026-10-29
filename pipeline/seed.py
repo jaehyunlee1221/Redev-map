@@ -1,4 +1,4 @@
-"""브이월드에서 직접 받은 파일 → data/seed/{시군구}/{법정동}_{parcels|zones|owners}.json.gz (+ dongs.json.gz)
+"""(보조) 브이월드에서 직접 받은 파일 → data/seed/{시군구}/{법정동}_{parcels|zones|owners}.json.gz (+ dongs.json.gz)
 fetch.py는 seed가 있으면 브이월드 API 대신 이걸 씀 (해외 IP 차단 우회).
   python -m pipeline.seed 11650 연속지적도.zip 용도지역.zip 토지소유정보.csv
 - shp(zip 또는 .shp): PNU 컬럼 있으면 지적도, 없으면 용도지역으로 판단. 좌표계는 .prj로 읽어 WGS84 변환
@@ -12,7 +12,8 @@ from pyproj import CRS, Transformer
 from shapely.geometry import shape, mapping
 from shapely.ops import unary_union
 from shapely import STRtree, set_precision, transform, make_valid
-from .common import SEED
+from .common import SEED, wr
+from .metrics import agg_owners
 OWN = {'pnu': ['고유번호', 'pnu'], 'lndcgrCodeNm': ['지목명', '지목'], 'lndpclAr': ['토지면적', '면적'],
        'pblntfPclnd': ['공시지가'], 'posesnSeCodeNm': ['소유구분명', '소유구분'], 'ownshipChgDe': ['소유권변동일자', '변동일자'],
        'cnrsPsnCo': ['공유인수'], 'cnrsPsnSn': ['공유인일련번호', '일련번호'], 'buldDongNm': ['건물동명', '동명'],
@@ -54,9 +55,7 @@ def _bad(raw, enc):
     except UnicodeDecodeError: return True
 
 
-def save(p, data):
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_bytes(gzip.compress(json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode()))
+save = wr
 
 
 def main(sgg, *files):
@@ -95,7 +94,10 @@ def main(sgg, *files):
         zi = tree.query(u, predicate='intersects') if tree else []
         if zones: save(d / f'{p10}_zones.json.gz', [dict(type='Feature', geometry=mapping(set_precision(zones[i][0].intersection(u.envelope), 1e-6)),
                                                properties=dict(uname=zones[i][1])) for i in zi])
-        if owners: save(d / f'{p10}_owners.json.gz', own.get(p10, []))
+        if owners:
+            byp = defaultdict(list)
+            for r in own.get(p10, []): byp[r['pnu']].append(r)
+            save(d / f'{p10}_owners.json.gz', {k: agg_owners(v) for k, v in byp.items()})
         print(p10, nm.get(p10, ''), f'필지 {len(ps)}, 용도지역 {len(zi)}, 소유 {len(own.get(p10, []))}', flush=True)
     save(d / 'dongs.json.gz', dongs)
 
