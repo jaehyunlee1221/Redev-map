@@ -2,12 +2,12 @@
   PC(국내 IP)   python -m pipeline.fetch seoul+seongnam vworld  → data/seed/{시군구}/*.json.gz (커밋해서 올림)
                  python -m pipeline.fetch test check            → 각 API가 되는지 점검만
   GitHub        python -m pipeline.fetch seeded bldgs          → data/raw/{시군구}/*_bldgs.json"""
-import os, sys, time
+import os, sys, time, subprocess
 import numpy as np
 import requests
 import shapely
 from shapely.geometry import shape, mapping
-from .common import regions, RAW, SEED, rd, wr
+from .common import regions, ROOT, RAW, SEED, rd, wr
 from .metrics import agg_owners
 
 VW = 'https://api.vworld.kr/req/data'
@@ -88,6 +88,18 @@ def run(path, fn, days):
         return 'ERR'
 
 
+def push(sgg):
+    """PUSH=1이면 구 하나 끝날 때마다 올림 → 지도가 구 단위로 바로바로 갱신"""
+    if not os.environ.get('PUSH'): return
+    git = lambda *a: subprocess.run(['git', *a], cwd=ROOT, capture_output=True, text=True)
+    git('add', 'data/seed')
+    if git('diff', '--cached', '--quiet').returncode == 0: return
+    git('commit', '-q', '-m', f'브이월드 데이터 갱신: {sgg}')
+    git('pull', '--rebase', '-q')
+    r = git('push', '-q')
+    print(f'{sgg} 업로드 ' + ('완료' if r.returncode == 0 else f'실패: {r.stderr.strip()[:200]}'), flush=True)
+
+
 def check(sgg):
     """API별로 한두 건만 불러보고 결과 출력"""
     def t(name, fn):
@@ -135,6 +147,7 @@ def main(arg, mode):
                 jobs = dict(bldgs=lambda: bh(sgg, emd[5:] + '00'))
             res = {k: run(base / f'{p10}_{k}{ext}', fn, DAYS[k]) for k, fn in jobs.items()}
             print(sgg, emd, f['properties'].get('emd_kor_nm', ''), res, flush=True)
+        if mode == 'vworld': push(sgg)
     if ERR: sys.exit(f'{len(ERR)}건 실패 (다시 실행하면 실패한 것만 다시 받음)\n' + '\n'.join(ERR[:20]))
 
 

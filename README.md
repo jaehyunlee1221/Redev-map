@@ -27,6 +27,7 @@
 | GitHub Actions | 건축물대장 표제부 → 지표 계산 → 지도 배포 | `data/seed` 푸시되면 자동 실행 (매월 2일에도 실행) |
 
 - `check.bat`: API가 되는지 1분 점검 (아무것도 올리지 않음)
+- `install_auto.bat`: 매일 9시(꺼져 있었으면 켜진 직후) `auto.bat` 자동 실행 등록. 최신 코드 받기 → 기한 지난 동만 수집 → 구 단위로 바로 업로드. 로그는 `logs/auto.log`, 해제는 `install_auto.bat remove`
 - `collect.bat vworld test`: 서초구만 / 기본값은 `seoul+seongnam`
 - 지적도·용도지역 90일, 소유정보 30일, 건축물대장 25일 이내 받은 동은 건너뜀 → 끊겨도 다시 실행하면 이어받음
 - 소유정보는 원본 행을 저장하지 않고 필지별 집계(추정 소유자 수·국공유 여부 등)만 커밋
