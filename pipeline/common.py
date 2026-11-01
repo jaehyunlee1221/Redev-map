@@ -10,9 +10,10 @@ OUT = ROOT / 'site' / 'data'
 
 if (ROOT / '.env').exists():  # PC용 키 파일: VWORLD_KEY=...
     for ln in (ROOT / '.env').read_text(encoding='utf-8-sig').splitlines():
-        if '=' in ln and not ln.lstrip().startswith('#'):
-            k, v = ln.split('=', 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"\''))
+        ln = ln.strip()
+        if not ln or ln.startswith('#'): continue
+        k, v = ln.split('=', 1) if '=' in ln else ('VWORLD_KEY', ln)  # 키만 붙여넣은 경우도 인식
+        os.environ.setdefault(k.strip(), v.strip().strip('"\''))
 
 
 def regions(arg):

@@ -102,6 +102,7 @@ def push(sgg):
 
 def check(sgg):
     """API별로 한두 건만 불러보고 결과 출력"""
+    print(f"브이월드 키: {VK[:4]}…{VK[-4:]} ({len(VK)}자, 보통 36자) / 도메인: {DOM or '(없음)'}", flush=True)
     def t(name, fn):
         try: print(f'[OK] {name}: {fn()}', flush=True)
         except Exception as e: print(f'[실패] {name}: {str(e)[:300]}', flush=True)
