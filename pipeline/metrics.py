@@ -50,7 +50,7 @@ def agg_owners(rows):
     sn, co = defaultdict(set), defaultdict(int)
     for r in rows:
         if pub(r): continue
-        u = (r.get('buldDongNm') or '', r.get('buldHoNm') or '')
+        u = tuple(r.get(k) or '0000' for k in ('agbldgSn', 'buldDongNm', 'buldFloorNm', 'buldHoNm', 'buldRoomNm'))  # 구분소유 단위 ('0000'=없음)
         sn[u].add(r.get('cnrsPsnSn'))
         co[u] = max(co[u], int(num(r.get('cnrsPsnCo'))))
     r0 = rows[0]

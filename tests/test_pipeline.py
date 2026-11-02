@@ -75,3 +75,24 @@ def test_end_to_end(tmp_path, monkeypatch):
 def test_regions():
     assert common.regions('test') == ['11650']
     assert common.regions('seoul+seongnam')[-3:] == ['41131', '41133', '41135'] and len(common.regions('seoul,seongnam')) == 28
+
+
+def test_owner_real_format():
+    """브이월드 실제 응답 형식: 없는 값은 '0000', 집합건물은 agbldgSn·층·호로 구분"""
+    R = lambda sn, ag='0000', fl='0000', ho='0000', co='0', se='개인': dict(
+        pnu='x', cnrsPsnSn=sn, agbldgSn=ag, buldDongNm='0000', buldFloorNm=fl, buldHoNm=ho, buldRoomNm='0000',
+        cnrsPsnCo=co, posesnSeCodeNm=se, lndpclAr='59.97', lndcgrCodeNm='대', pblntfPclnd='11780000', ownshipChgDe='2015-01-05')
+    o = agg_owners([R('000001', '0160', '4', '401'), R('000002', '0160', '4', '401'),   # 401호 부부 공동
+                    R('000003', '0161', '4', '401'),                                    # 다른 동 건물의 401호
+                    R('000004', '0160', '5', '501'), R('000005', se='시,도유지')])
+    assert (o['ol'], o['oh'], o['pub'], o['gj'], o['cg']) == (3, 4, 0, 11780000, '2015-01')
+
+
+def test_paging(monkeypatch):
+    """페이지당 건수가 요청보다 적게 와도 끝까지 받음 / 한도 초과면 Stop"""
+    pages = {1: ['a'] * 300, 2: ['b'] * 300, 3: ['c'] * 50}
+    monkeypatch.setattr(fetch, 'get', lambda url, **p: {'possessions': {'totalCount': '650', 'field': pages[p['pageNo']]}})
+    assert len(fetch.ned('1165010600')) == 650
+    monkeypatch.setattr(fetch, 'get', lambda url, **p: {'response': {'status': 'ERROR', 'error': {'code': 'OVER_REQUEST_LIMIT'}}})
+    try: fetch.vw('LT_C_UQ111'); assert False
+    except fetch.Stop: pass

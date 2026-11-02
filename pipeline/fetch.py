@@ -18,6 +18,14 @@ DAYS = dict(dongs=90, parcels=90, zones=90, owners=30, bldgs=25)  # 이 기간 �
 ERR = []
 
 
+class Stop(Exception):  # 일일 호출 한도 초과 → 오늘은 여기까지, 받은 것만 올림
+    pass
+
+
+def limit(msg):
+    if any(k in str(msg) for k in ('OVER_REQUEST_LIMIT', 'LIMIT', '한도', '초과')): raise Stop(str(msg)[:200])
+
+
 def get(url, **p):
     for i in range(4):
         try:
@@ -37,7 +45,7 @@ def vw(layer, **flt):  # 브이월드 2D 데이터 (연속지적도, 용도지�
         j = get(VW, service='data', request='GetFeature', data=layer, key=VK, domain=DOM,
                 format='json', crs='EPSG:4326', size=1000, page=page, **flt)['response']
         if j['status'] == 'NOT_FOUND': return out
-        if j['status'] != 'OK': raise RuntimeError(f'{layer} {flt}: {j.get("error")}')
+        if j['status'] != 'OK': limit(j.get('error')); raise RuntimeError(f'{layer} {flt}: {j.get("error")}')
         out += j['result']['featureCollection']['features']
         if page >= int(j['page']['total']): return out
         page += 1
@@ -48,10 +56,10 @@ def ned(pnu):  # 토지소유정보 (PNU 앞자리로 조회)
     while True:
         j = get(NED, key=VK, domain=DOM, pnu=pnu, format='json', numOfRows=1000, pageNo=page)
         j = j.get('possessions', j)
-        if 'field' not in j and 'totalCount' not in j: raise RuntimeError(f'토지소유정보 {pnu}: {str(j)[:300]}')
+        if 'field' not in j and 'totalCount' not in j: limit(j); raise RuntimeError(f'토지소유정보 {pnu}: {str(j)[:300]}')
         rows = j.get('field') or []
         out += rows
-        if not rows or page * 1000 >= int(j['totalCount']): return out
+        if not rows or len(out) >= int(j['totalCount']): return out  # 페이지당 건수가 요청보다 적어도 끝까지
         page += 1
 
 
@@ -59,10 +67,11 @@ def bh(sgg, bjd):  # 건축물대장 표제부
     out, page = [], 1
     while True:
         b = get(BH, serviceKey=DK, sigunguCd=sgg, bjdongCd=bjd, numOfRows=100, pageNo=page, _type='json')['response']
-        if b['header']['resultCode'] not in ('00', '0'): raise RuntimeError(f'건축물대장 {sgg}{bjd}: {b["header"]}')
+        if b['header']['resultCode'] not in ('00', '0'): limit(b['header']); raise RuntimeError(f'건축물대장 {sgg}{bjd}: {b["header"]}')
         items = (b['body'].get('items') or {}).get('item') or []
-        out += items if isinstance(items, list) else [items]
-        if page * 100 >= int(b['body']['totalCount']): return out
+        items = items if isinstance(items, list) else [items]
+        out += items
+        if not items or len(out) >= int(b['body']['totalCount']): return out
         page += 1
 
 
@@ -83,6 +92,7 @@ def run(path, fn, days):
         data = fn()
         wr(path, data)
         return len(data)
+    except Stop: raise
     except Exception as e:
         ERR.append(f'{path.name}: {e}')
         return 'ERR'
@@ -126,6 +136,15 @@ def main(arg, mode):
     if os.name == 'nt':  # 윈도우: 수집 중 절전 방지
         import ctypes; ctypes.windll.kernel32.SetThreadExecutionState(0x80000001)
     if mode == 'check': return check(regions(arg)[0])
+    try: collect(arg, mode)
+    except Stop as e:
+        print(f'일일 호출 한도에 걸려 오늘은 여기까지 받습니다 → 내일 이어서 받음 ({e})', flush=True)
+        if mode == 'vworld': push('일부')
+        return
+    if ERR: sys.exit(f'{len(ERR)}건 실패 (다시 실행하면 실패한 것만 다시 받음)\n' + '\n'.join(ERR[:20]))
+
+
+def collect(arg, mode):
     for sgg in regions(arg):
         if mode == 'vworld':
             run(SEED / sgg / 'dongs.json.gz', lambda: [feat(f, 6, **{k: f['properties'].get(k, '') for k in ('emd_cd', 'full_nm', 'emd_kor_nm')})
@@ -149,7 +168,6 @@ def main(arg, mode):
             res = {k: run(base / f'{p10}_{k}{ext}', fn, DAYS[k]) for k, fn in jobs.items()}
             print(sgg, emd, f['properties'].get('emd_kor_nm', ''), res, flush=True)
         if mode == 'vworld': push(sgg)
-    if ERR: sys.exit(f'{len(ERR)}건 실패 (다시 실행하면 실패한 것만 다시 받음)\n' + '\n'.join(ERR[:20]))
 
 
 if __name__ == '__main__':
