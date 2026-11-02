@@ -8,13 +8,14 @@ import requests
 import shapely
 from shapely.geometry import shape, mapping
 from .common import regions, ROOT, RAW, SEED, rd, wr
-from .metrics import agg_owners
+from .metrics import agg_owners, unit, LAND
 
 VW = 'https://api.vworld.kr/req/data'
 NED = 'https://api.vworld.kr/ned/data/getPossessionAttr'
 BH = 'https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo'
 VK, DK, DOM = (os.environ.get(k, '') for k in ('VWORLD_KEY', 'DATA_GO_KR_KEY', 'VWORLD_DOMAIN'))
 DAYS = dict(dongs=90, parcels=90, zones=90, owners=30, bldgs=25)  # 이 기간 안에 받은 파일은 건너뜀
+VER = dict(owners=2)  # 집계 방식이 바뀌면 올림 → 예전 파일은 기한 내라도 다시 받음
 ERR = []
 
 
@@ -80,14 +81,30 @@ def feat(f, nd=7, **props):  # 좌표 반올림 + 필요한 속성만 남김
     return dict(type='Feature', geometry=mapping(g), properties=props)
 
 
-def owners(p10):  # 원본 행은 저장하지 않고 필지별 집계만 남김
+def owners(p10):
+    """원본 행은 저장하지 않고 필지별 집계만 남김.
+    아파트 단지가 여러 필지에 걸치면 필지마다 같은 호가 다 나옴 → 호가 가장 많은 필지에만 세고, 나머지는 dp=대표필지"""
     rows = {}
     for r in ned(p10): rows.setdefault(r['pnu'], []).append(r)
-    return {pnu: agg_owners(rs) for pnu, rs in rows.items()}
+    out, owner_of = {'_v': VER['owners']}, {}
+    for pnu, rs in sorted(rows.items(), key=lambda kv: -len({unit(r) for r in kv[1]})):
+        us = {unit(r) for r in rs} - {LAND}
+        hit = {}
+        for u in us:
+            if u in owner_of: hit[owner_of[u]] = hit.get(owner_of[u], 0) + 1
+        main = max(hit, key=hit.get) if hit else None
+        o = agg_owners(rs)
+        if main and hit[main] >= 0.8 * len(us):
+            o.update(ol=0, oh=0, dp=main)
+        else:
+            for u in us: owner_of.setdefault(u, pnu)
+        out[pnu] = o
+    return out
 
 
-def run(path, fn, days):
-    if path.exists() and time.time() - path.stat().st_mtime < days * 86400: return '-'
+def run(path, fn, days, ver=None):
+    if path.exists() and time.time() - path.stat().st_mtime < days * 86400:
+        if ver is None or rd(path.parent.name, path.name.removesuffix('.gz')).get('_v') == ver: return '-'
     print(f'  {path.name} 받는 중…', end='', flush=True)
     t0 = time.time()
     try:
@@ -171,7 +188,7 @@ def collect(arg, mode):
             else:
                 base, ext = RAW / sgg, '.json'
                 jobs = dict(bldgs=lambda: bh(sgg, emd[5:] + '00'))
-            res = {k: run(base / f'{p10}_{k}{ext}', fn, DAYS[k]) for k, fn in jobs.items()}
+            res = {k: run(base / f'{p10}_{k}{ext}', fn, DAYS[k], VER.get(k)) for k, fn in jobs.items()}
             print(sgg, emd, f['properties'].get('emd_kor_nm', ''), res, flush=True)
         if mode == 'vworld': push(sgg)
 

@@ -42,6 +42,14 @@ def agg_bldgs(bs):  # 주건축물만
                 y0=min(ys, default=None), y1=max(ys, default=None))
 
 
+UNIT = ('agbldgSn', 'buldDongNm', 'buldFloorNm', 'buldHoNm', 'buldRoomNm')
+LAND = ('0000',) * 5
+
+
+def unit(r):  # 구분소유 단위 (동·층·호). 일반 토지는 LAND
+    return tuple(r.get(k) or '0000' for k in UNIT)
+
+
 def agg_owners(rows):
     """ol = 구분소유 단위(공유는 대표 1인), oh = 공유자 각각 → 추정 소유자 수 범위.
     같은 사람이 여러 필지·호를 가진 경우는 구분 불가(실제보다 많게 잡힘)."""
@@ -50,9 +58,9 @@ def agg_owners(rows):
     sn, co = defaultdict(set), defaultdict(int)
     for r in rows:
         if pub(r): continue
-        u = tuple(r.get(k) or '0000' for k in ('agbldgSn', 'buldDongNm', 'buldFloorNm', 'buldHoNm', 'buldRoomNm'))  # 구분소유 단위 ('0000'=없음)
+        u = unit(r)
         sn[u].add(r.get('cnrsPsnSn'))
-        co[u] = max(co[u], int(num(r.get('cnrsPsnCo'))))
+        if u == LAND: co[u] = max(co[u], int(num(r.get('cnrsPsnCo'))))  # 공유인수는 토지 공유에만 의미 (집합건물 호별 행엔 대지 전체 공유자 수가 붙음)
     r0 = rows[0]
     return dict(ol=len(sn), oh=sum(max(len(sn[u]), co[u], 1) for u in sn), pub=int(not sn),
                 ar=round(num(r0.get('lndpclAr')), 1), jm=r0.get('lndcgrCodeNm') or '',

@@ -53,7 +53,7 @@ def test_end_to_end(tmp_path, monkeypatch):
                                                                   '9999910100_zones.json.gz', 'dongs.json.gz']
     assert not raw.exists()
     own = common.rd('99999', '9999910100_owners.json')
-    assert list(own) == ['9999910100100010000'] and own['9999910100100010000']['oh'] == 2   # 원본 행 아닌 필지별 집계
+    assert list(own) == ['_v', '9999910100100010000'] and own['9999910100100010000']['oh'] == 2   # 원본 행 아닌 필지별 집계
     assert common.rd('99999', '9999910100_parcels.json')[0]['properties'] == dict(pnu='9999910100100010000', jibun='1대')
     m = (seed / '99999' / 'dongs.json.gz').stat().st_mtime
     fetch.main('99999', 'vworld')                                                                  # 기한 내 → 건너뜀
@@ -96,3 +96,16 @@ def test_paging(monkeypatch):
     monkeypatch.setattr(fetch, 'get', lambda url, **p: {'response': {'status': 'ERROR', 'error': {'code': 'OVER_REQUEST_LIMIT'}}})
     try: fetch.vw('LT_C_UQ111'); assert False
     except fetch.Stop: pass
+
+
+def test_apartment_multi_parcel(monkeypatch):
+    """아파트 호별 행의 공유인수(대지 전체 공유자 수)는 무시 / 여러 필지에 걸친 단지는 대표 필지에만 셈"""
+    R = lambda pnu, ho, sn='000001', co='48': dict(pnu=pnu, cnrsPsnSn=sn, cnrsPsnCo=co, agbldgSn='0001', buldDongNm='101',
+                                                   buldFloorNm='1', buldHoNm=ho, buldRoomNm='0000', posesnSeCodeNm='개인')
+    big = [R('A', h) for h in ('101', '102', '103', '104', '105')] + [R('A', '101', '000002')]
+    small = [R('B', h) for h in ('101', '102', '103', '104')]
+    land = [dict(pnu='C', cnrsPsnSn='1', cnrsPsnCo='3', posesnSeCodeNm='개인')]
+    monkeypatch.setattr(fetch, 'ned', lambda p: small + land + big)
+    o = fetch.owners('x')
+    assert (o['A']['ol'], o['A']['oh']) == (5, 6) and o['B'] == {**o['B'], 'ol': 0, 'oh': 0, 'dp': 'A'}
+    assert o['C']['oh'] == 3 and o['_v'] == fetch.VER['owners']

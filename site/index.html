@@ -136,7 +136,7 @@ map.on('click', e => {
   const html = p ? `<b>${p.j}</b> · ${p.z || '용도지역 미상'}<br>면적 ${fmt(p.ar)}㎡ · ${p.jm} · 공시지가 ${fmt(p.gj)}원/㎡<br>
       건물 ${p.nb}동 (노후 ${p.no}, 미상 ${p.nu})${p.y0 ? ` · 준공 ${p.y0}${p.y1 !== p.y0 ? '–' + p.y1 : ''}` : ''}<br>
       세대·가구 ${fmt(p.hh)} · 집합 호수 ${fmt(p.ho)}<br>
-      추정 소유자 ${p.pub ? '국공유' : p.ol === p.oh ? p.ol + '명' : `${p.ol}~${p.oh}명`}${p.oe ? ' <span style="color:#9ca3af">(대체값)</span>' : ''}
+      추정 소유자 ${p.dp ? `같은 단지 → ${+p.dp.slice(11, 15)}${+p.dp.slice(15) ? '-' + +p.dp.slice(15) : ''}번지에 합산` : p.pub ? '국공유' : p.ol === p.oh ? p.ol + '명' : `${p.ol}~${p.oh}명`}${p.oe ? ' <span style="color:#9ca3af">(대체값)</span>' : ''}
       ${p.cg ? `<br>최근 소유권변동 ${p.cg}` : ''}`
     + zoneInfo(e.point)
     : d ? `<b>${d.n}</b><br>노후도 ${pct(d.r)} (${fmt(d.no)}/${fmt(d.nb)}동)<br>필지 ${fmt(d.np)} · 추정 소유자 ${fmt(d.ol)}명` : null;
