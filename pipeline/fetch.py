@@ -88,8 +88,11 @@ def owners(p10):  # 원본 행은 저장하지 않고 필지별 집계만 남김
 
 def run(path, fn, days):
     if path.exists() and time.time() - path.stat().st_mtime < days * 86400: return '-'
+    print(f'  {path.name} 받는 중…', end='', flush=True)
+    t0 = time.time()
     try:
         data = fn()
+        print(f' {len(data)}건, {time.time() - t0:.0f}초', flush=True)
         wr(path, data)
         return len(data)
     except Stop: raise
