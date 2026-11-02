@@ -36,8 +36,9 @@ if errorlevel 1 goto :end
 
 set PUSH=1
 .venv\Scripts\python.exe -m pipeline.fetch %REGION% %MODE%
-if errorlevel 1 echo [!] Some items failed. They will be retried next run.
-if /i "%MODE%"=="vworld" echo Done. Updated districts were uploaded; the map rebuilds on GitHub in a few minutes.
+if errorlevel 1 (
+  echo [!] Some items failed. They will be retried next run.
+) else if /i "%MODE%"=="vworld" echo Done. Updated districts were uploaded; the map rebuilds on GitHub in a few minutes.
 
 :end
 if not defined AUTO pause

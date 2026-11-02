@@ -106,11 +106,14 @@ def push(sgg):
     if not os.environ.get('PUSH'): return
     git = lambda *a: subprocess.run(['git', *a], cwd=ROOT, capture_output=True, text=True)
     git('add', 'data/seed')
-    if git('diff', '--cached', '--quiet').returncode == 0: return
-    git('commit', '-q', '-m', f'브이월드 데이터 갱신: {sgg}')
+    if git('diff', '--cached', '--quiet').returncode: git('commit', '-q', '-m', f'브이월드 데이터 갱신: {sgg}')
     git('pull', '--rebase', '-q')
-    r = git('push', '-q')
-    print(f'{sgg} 업로드 ' + ('완료' if r.returncode == 0 else f'실패: {r.stderr.strip()[:200]}'), flush=True)
+    tok = os.environ.get('GH_TOKEN')  # 선택: .env에 GH_TOKEN=... 넣으면 로그인 창 없이 올림
+    url = git('remote', 'get-url', 'origin').stdout.strip().replace('https://', f'https://x-access-token:{tok}@') if tok else 'origin'
+    r = git('push', '-q', url, 'HEAD:main')  # 지난번에 못 올린 것도 같이 올라감
+    if r.returncode == 0: return print(f'{sgg} 업로드 완료', flush=True)
+    ERR.append(f'GitHub 업로드 실패: {r.stderr.replace(tok or "@@", "***").strip()[:200]}')
+    print(f'{sgg} 업로드 실패 → 받은 데이터는 PC에 남아 있고 다음 실행 때 다시 올림', flush=True)
 
 
 def check(sgg):
