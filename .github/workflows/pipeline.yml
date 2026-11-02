@@ -47,12 +47,17 @@ jobs:
       - name: build
         if: always()                        # 수집이 일부 실패해도 받은 동까지는 지도에 반영
         run: python -m pipeline.build "$REGION" 2>&1 | tee build.log; exit ${PIPESTATUS[0]}
+      - name: redev                         # 정비사업 구역·단계 (서울 열린데이터광장)
+        if: always()
+        run: python -m pipeline.redev 2>&1 | tee redev.log; exit ${PIPESTATUS[0]}
+        env:
+          SEOUL_API_KEY: ${{ secrets.SEOUL_API_KEY }}
       - name: report                        # 로그 끝부분을 annotation으로 남김 (로그인 없이 API로 조회 가능)
         if: always()
         run: |
           python - <<'EOF'
           import pathlib
-          for n in ('fetch', 'build'):
+          for n in ('fetch', 'build', 'redev'):
               p = pathlib.Path(f'{n}.log')
               if p.exists():
                   t = p.read_text(errors='replace')[-3000:].replace('%', '%25').replace('\r', '').replace('\n', '%0A')

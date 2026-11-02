@@ -109,3 +109,13 @@ def test_apartment_multi_parcel(monkeypatch):
     o = fetch.owners('x')
     assert (o['A']['ol'], o['A']['oh']) == (5, 6) and o['B'] == {**o['B'], 'ol': 0, 'oh': 0, 'dp': 'A'}
     assert o['C']['oh'] == 3 and o['_v'] == fetch.VER['owners']
+
+
+def test_redev_addr():
+    from pipeline.redev import parse_addr
+    G = ['서초구', '양천구', '중구']
+    assert parse_addr('서울특별시 서초구 잠원동 60-3번지 일대', G) == ('서초구', '잠원동', 60, 3)
+    assert parse_addr('양천구목동903', G) == ('양천구', '목동', 903, 0)
+    assert parse_addr('쌍문2동 81번지', G) == (None, '쌍문동', 81, 0)
+    assert parse_addr('중구 충무로1가 24-1', G) == ('중구', '충무로1가', 24, 1)
+    assert parse_addr('서초구 방배동 산108-1', G)[2] is None

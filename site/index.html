@@ -27,6 +27,12 @@
   .note { color:var(--muted); font-size:12px; margin-top:8px; }
   #msg { position:absolute; top:58px; left:50%; transform:translateX(-50%); background:#111c; color:#fff; padding:6px 12px; border-radius:99px; font-size:13px; z-index:2; display:none; }
   .maplibregl-popup-content { font-size:13px; line-height:1.5; }
+  .steps { display:flex; gap:2px; margin:6px 0 2px; } .steps span { flex:1; height:6px; border-radius:3px; background:#e5e7eb; }
+  .stepn { display:flex; justify-content:space-between; font-size:10px; color:var(--muted); }
+  .zi { padding:7px 4px; border-bottom:1px solid var(--line); cursor:pointer; } .zi:hover { background:#f3f4f6; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; vertical-align:-1px; }
+  .x { position:absolute; right:10px; top:8px; border:0; background:none; font-size:20px; color:var(--muted); }
+  .maplibregl-ctrl-group button { width:36px; height:36px; }
   @media (max-width:640px) {
     #panel { left:0; right:0; top:auto; bottom:0; width:auto; max-height:55%; border-radius:14px 14px 0 0; }
   }
@@ -42,7 +48,9 @@
     <option value="new">최근 신축</option>
     <option value="zone">용도지역</option>
   </select>
-  <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="rz" checked>건축규제구역</label>
+  <button id="zl">정비사업 목록</button>
+  <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="zn" checked>정비사업</label>
+  <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="rz">건축규제구역</label>
   <button id="draw">구역 그리기</button>
   <button id="done" style="display:none">계산</button>
   <button id="clear" style="display:none">지우기</button>
@@ -77,8 +85,20 @@ const map = new maplibregl.Map({
   container: 'map', center: [127.02, 37.48], zoom: 12, doubleClickZoom: false,
   style: { version: 8, sources: { base: { type: 'raster', tileSize: 256, attribution: '© OpenStreetMap © CARTO · 브이월드 · 건축HUB',
     tiles: ['a', 'b', 'c'].map(s => `https://${s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png`) } },
+    glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
     layers: [{ id: 'base', type: 'raster', source: 'base' }] },
 });
+
+map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');   // 확대·축소 버튼
+map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true } }), 'bottom-right');  // 내 위치
+map.addControl(new maplibregl.ScaleControl(), 'bottom-right');
+
+// 정비사업 단계 (서울시 도시정비사업 통계 기준)
+const STAGES = ['구역지정', '추진위', '조합설립', '건축심의', '사업시행', '관리처분', '이주', '착공', '준공'];
+const SCOL = ['#fcd34d', '#fb923c', '#f97316', '#ea580c', '#dc2626', '#be123c', '#9d174d', '#6d28d9', '#374151'];
+const scol = i => SCOL[i] ?? '#9ca3af';
+const DLAB = [['zd', '구역지정'], ['cm', '추진위 승인'], ['jo', '조합설립 인가'], ['sa', '사업시행 인가'], ['gc', '관리처분 인가'], ['ij', '이주 시작'], ['cs', '착공']];
+let Z = [];
 
 function msg(t) { $('msg').textContent = t; $('msg').style.display = t ? 'block' : 'none'; }
 
@@ -113,7 +133,20 @@ map.on('load', async () => {
     map.addSource('redev', { type: 'geojson', data: await (await fetch('data/redev.geojson')).json() });
     map.addLayer({ id: 'r-fill', type: 'fill', source: 'redev', paint: { 'fill-color': '#7c3aed', 'fill-opacity': 0.06 } });
     map.addLayer({ id: 'r-line', type: 'line', source: 'redev', paint: { 'line-color': '#7c3aed', 'line-width': 2, 'line-dasharray': [3, 2] } });
+    ['r-fill', 'r-line'].forEach(l => map.setLayoutProperty(l, 'visibility', 'none'));
   } catch (e) { $('rz').parentElement.style.display = 'none'; }
+  try {  // 정비사업 구역 (대표 지번 위치)
+    Z = (await (await fetch('data/zones.geojson')).json()).features;
+    map.addSource('zones', { type: 'geojson', data: fc(Z) });
+    map.addLayer({ id: 'z-pt', type: 'circle', source: 'zones', paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 5, 15, 9],
+      'circle-color': ['match', ['get', 'si'], ...SCOL.flatMap((c, i) => [i, c]), '#9ca3af'],
+      'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+    map.addLayer({ id: 'z-lb', type: 'symbol', source: 'zones', minzoom: 13, layout: {
+      'text-field': ['concat', ['get', 'n'], '\n', ['get', 's']], 'text-font': ['Noto Sans Regular'], 'text-size': 12,
+      'text-offset': [0, 1.1], 'text-anchor': 'top', 'text-optional': true },
+      paint: { 'text-color': '#111827', 'text-halo-color': '#fff', 'text-halo-width': 1.6 } });
+  } catch (e) { $('zn').parentElement.style.display = $('zl').style.display = 'none'; }
   map.addLayer({ id: 'dr-fill', type: 'fill', source: 'draw', filter: ['==', '$type', 'Polygon'], paint: { 'fill-color': '#2563eb', 'fill-opacity': 0.12 } });
   map.addLayer({ id: 'dr-line', type: 'line', source: 'draw', paint: { 'line-color': '#2563eb', 'line-width': 2.5, 'line-dasharray': [2, 1] } });
   map.addLayer({ id: 'dr-pt', type: 'circle', source: 'draw', filter: ['==', '$type', 'Point'], paint: { 'circle-radius': 5, 'circle-color': '#2563eb', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
@@ -124,6 +157,7 @@ map.on('load', async () => {
 });
 
 $('mode').onchange = e => setMode(e.target.value);
+$('zn').onchange = e => ['z-pt', 'z-lb'].forEach(l => map.getLayer(l) && map.setLayoutProperty(l, 'visibility', e.target.checked ? 'visible' : 'none'));
 $('rz').onchange = e => ['r-fill', 'r-line'].forEach(l => map.getLayer(l) && map.setLayoutProperty(l, 'visibility', e.target.checked ? 'visible' : 'none'));
 const zoneInfo = pt => map.getLayer('r-fill') ? map.queryRenderedFeatures(pt, { layers: ['r-fill'] }).map(f => f.properties)
   .map(z => `<br><span style="color:#7c3aed">■ 건축규제 구역 ${({UDX100: '건축허가 제한', UDX200: '건축선·높이 등', UDX999: '기타'})[z.cd] || z.cd}${z.nm ? ' · ' + z.nm : ''}${z.dt ? ' · 고시 ' + z.dt.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : ''}</span>`).join('') : '';
@@ -131,6 +165,8 @@ const zoneInfo = pt => map.getLayer('r-fill') ? map.queryRenderedFeatures(pt, { 
 // ---------- 팝업 ----------
 map.on('click', e => {
   if (drawing) { pts.push([e.lngLat.lng, e.lngLat.lat]); renderDraw(); return; }
+  const z = map.getLayer('z-pt') && map.queryRenderedFeatures(e.point, { layers: ['z-pt'] })[0];
+  if (z) return zonePopup(z);
   const p = map.queryRenderedFeatures(e.point, { layers: ['p-fill'] })[0]?.properties;
   const d = map.queryRenderedFeatures(e.point, { layers: ['d-fill'] })[0]?.properties;
   const html = p ? `<b>${p.j}</b> · ${p.z || '용도지역 미상'}<br>면적 ${fmt(p.ar)}㎡ · ${p.jm} · 공시지가 ${fmt(p.gj)}원/㎡<br>
@@ -143,6 +179,42 @@ map.on('click', e => {
   const html2 = html || (zoneInfo(e.point) ? zoneInfo(e.point).slice(4) : null);
   if (html2) new maplibregl.Popup({ maxWidth: '280px' }).setLngLat(e.lngLat).setHTML(html2).addTo(map);
 });
+
+// ---------- 정비사업 ----------
+function zonePopup(f) {
+  const z = f.properties, si = +z.si;
+  const hh = z.bh ? `기존 ${fmt(z.eh)}세대 → <b>계획 ${fmt(z.bh)}세대</b>${z.sh || z.rh ? ` (분양 ${fmt(z.sh)} · 임대 ${fmt(z.rh)})` : ''}` : z.eh ? `기존 ${fmt(z.eh)}세대` : '';
+  const ds = DLAB.filter(([k]) => z[k]).map(([k, l]) => `<tr><td>${l}</td><td style="text-align:right">${z[k]}</td></tr>`).join('');
+  new maplibregl.Popup({ maxWidth: '300px' }).setLngLat(f.geometry.coordinates).setHTML(
+    `<b style="font-size:14px">${z.n}</b><br><span style="color:#6b7280">${[z.gu, z.t, z.pp, z.gp].filter(Boolean).join(' · ')}</span>
+     <div style="margin-top:6px">현재 단계 <b style="color:${scol(si)}">${z.s || '미상'}</b></div>
+     <div class="steps">${STAGES.slice(0, 8).map((s, i) => `<span style="background:${i <= si ? scol(si) : ''}" title="${s}"></span>`).join('')}</div>
+     <div class="stepn"><span>구역지정</span><span>조합</span><span>사업시행</span><span>관리처분</span><span>착공</span></div>
+     ${hh ? `<div style="margin-top:6px">${hh}</div>` : ''}
+     ${ds ? `<table style="width:100%;margin-top:6px;font-size:12px">${ds}</table>` : ''}
+     <div style="color:#9ca3af;font-size:11px;margin-top:4px">${z.a || ''}${z.loc === '근처' ? ' (근처 지번에 표시)' : ''}</div>`).addTo(map);
+}
+function zoneList() {
+  const f = $('zf')?.value ?? '';
+  const L = Z.filter(x => !f || x.properties.s === f).sort((a, b) => b.properties.si - a.properties.si || a.properties.n.localeCompare(b.properties.n));
+  const cnt = STAGES.map(s => [s, Z.filter(x => x.properties.s === s).length]).filter(([, n]) => n);
+  $('panel').innerHTML = `<button class="x" onclick="$('panel').style.display='none'">×</button><h3>정비사업 ${fmt(Z.length)}곳</h3>
+    <select id="zf" style="width:100%;padding:6px;margin-bottom:6px"><option value="">전체 단계</option>
+      ${cnt.map(([s, n]) => `<option ${s === f ? 'selected' : ''} value="${s}">${s} (${n})</option>`).join('')}</select>
+    ${L.map((x, i) => `<div class="zi" data-i="${Z.indexOf(x)}"><span class="dot" style="background:${scol(+x.properties.si)}"></span>
+      <b>${x.properties.n}</b> <span style="color:#6b7280">${x.properties.s || ''}</span><br>
+      <span style="color:#6b7280;font-size:12px">${[x.properties.gu, x.properties.t, x.properties.bh ? '계획 ' + fmt(x.properties.bh) + '세대' : '', x.properties.zd ? '지정 ' + x.properties.zd.slice(0, 4) : ''].filter(Boolean).join(' · ')}</span></div>`).join('')}
+    <div class="note">서울시 도시정비사업 통계(분기 갱신) 기준. 아직 수집 안 된 구의 구역은 수집되면 추가됩니다.</div>`;
+  $('panel').style.display = 'block';
+  $('zf').onchange = zoneList;
+  $('panel').querySelectorAll('.zi').forEach(el => el.onclick = () => {
+    const x = Z[+el.dataset.i];
+    map.flyTo({ center: x.geometry.coordinates, zoom: 16 });
+    zonePopup(x);
+    if (innerWidth <= 640) $('panel').style.display = 'none';
+  });
+}
+$('zl').onclick = () => $('panel').style.display === 'block' && $('zf') ? $('panel').style.display = 'none' : zoneList();
 
 // ---------- 구역 그리기 ----------
 function renderDraw(closed) {
@@ -191,7 +263,7 @@ function showStats(poly) {
     .sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k.replace('지역', '')} ${pct(v / ar)}`).join('<br>');
   const r = no / nb, ok = r >= AGING;
   const row = (k, v) => `<tr><td>${k}</td><td>${v}</td></tr>`;
-  $('panel').innerHTML = `<h3>선택 구역 분석</h3>
+  $('panel').innerHTML = `<button class="x" onclick="$('panel').style.display='none'">×</button><h3>선택 구역 분석</h3>
     <div style="margin-bottom:10px">노후도 <b style="font-size:20px">${pct(r)}</b>
       <span class="badge" style="background:var(--${ok ? 'ok' : 'bad'})">${ok ? '요건 충족' : '요건 미달'} (기준 ${pct(AGING)})</span></div>
     <table>
