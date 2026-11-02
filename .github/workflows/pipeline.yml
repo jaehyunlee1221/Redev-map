@@ -17,7 +17,7 @@ permissions:
   pages: write
   id-token: write
 
-concurrency: { group: pipeline, cancel-in-progress: true }
+concurrency: { group: pipeline, cancel-in-progress: false }   # 구가 연달아 올라와도 진행 중인 빌드는 끝까지 (대기 중인 건 최신 것 하나만 남음)
 
 jobs:
   build:
