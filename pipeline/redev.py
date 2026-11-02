@@ -16,7 +16,7 @@ DATES = dict(zd='ZONE_DESIGNATION_INIT_YMD', cm='PROMOTION_COMMITTEE_YMD', jo='A
 def fetch_seoul():
     key, out, a = os.environ.get('SEOUL_API_KEY') or 'sample', [], 1
     while True:
-        r = requests.get(URL.format(key=key, a=a, b=a + 999), timeout=60)
+        r = requests.get(URL.format(key=key, a=a, b=a + (4 if key == 'sample' else 999)), timeout=60)  # 예시 키는 5건까지만
         try: d = r.json()
         except ValueError: raise RuntimeError(f'JSON 아님 (HTTP {r.status_code}): {r.text[:200]}')
         x = d.get('TbSeoulRedevStatus')

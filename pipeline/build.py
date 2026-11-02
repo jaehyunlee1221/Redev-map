@@ -2,12 +2,19 @@
 import sys, json, math, re
 from collections import defaultdict
 from shapely.geometry import shape, mapping
-from shapely import STRtree, set_precision
+from shapely import STRtree, set_precision, make_valid
 from .common import regions, OUT, SEED, rd
 from .metrics import agg_bldgs, pnu_of
 
 dump = lambda p, feats: p.write_text(json.dumps(dict(type='FeatureCollection', features=feats), ensure_ascii=False,
                                                 separators=(',', ':')), encoding='utf-8')
+
+
+def snap(g):  # 좌표 정밀도 1e-6으로 → 꼬인 도형은 고쳐서, 그래도 안 되면 원본 그대로
+    for fix in (lambda: g, lambda: make_valid(g)):
+        try: return mapping(set_precision(fix(), 1e-6))
+        except Exception: pass
+    return mapping(g)
 
 
 def m2(g):  # 위경도 면적 → ㎡ (근사)
@@ -31,7 +38,7 @@ def build_dong(sgg, p10, parcels):
         o = own.get(pnu) or dict(ol=None, oh=None, pub=0, ar=round(m2(g), 1), jm=re.sub(r'^[\d\-\s산]+', '', jb), gj=0, cg='')
         p = dict(p=pnu, j=jb, z=z, **o, **agg_bldgs(bld.get(pnu, [])), cx=round(pt.x, 6), cy=round(pt.y, 6))
         if p['ol'] is None: p['ol'] = p['oh'] = 0 if p['pub'] else max(p['ho'], 1); p['oe'] = 1  # 소유정보 없음 → 호수 또는 1인
-        feats.append(dict(type='Feature', geometry=mapping(set_precision(g, 1e-6)), properties=p))
+        feats.append(dict(type='Feature', geometry=snap(g), properties=p))
     dump(OUT / f'{p10}.geojson', feats)
     s = lambda k: sum(x['properties'][k] for x in feats)
     return dict(np=len(feats), nb=s('nb'), no=s('no'), nu=s('nu'), ol=s('ol'), oe=sum(x['properties'].get('oe', 0) for x in feats))
@@ -50,7 +57,7 @@ def main(arg):
             sm = build_dong(sgg, p10, parcels)
             nm = pr.get('full_nm') or next((' '.join(b['platPlc'].split()[:3]) for b in rd(sgg, f'{p10}_bldgs.json') or []
                                             if b.get('platPlc')), p10)  # 파일로 올린 동은 이름이 없어 건축물대장 주소로
-            dongs[p10] = dict(type='Feature', geometry=mapping(set_precision(g.simplify(1e-5), 1e-6)),
+            dongs[p10] = dict(type='Feature', geometry=snap(g.simplify(1e-5)),
                               properties=dict(c=p10, n=nm, b=[round(v, 5) for v in g.bounds],
                                               r=round(sm['no'] / sm['nb'], 3) if sm['nb'] else None, **sm))
             print(p10, nm, sm, flush=True)

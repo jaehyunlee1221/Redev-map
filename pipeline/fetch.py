@@ -33,11 +33,11 @@ def get(url, **p):
             r = requests.get(url, params=p, timeout=90)
             r.raise_for_status()
             return r.json()
-        except ValueError:
-            raise RuntimeError(f'JSON 아님: {r.text[:300]}')
+        except ValueError:  # 빈 응답은 서버가 잠깐 버벅인 것 → 다시 시도, 내용이 있으면 오류 메시지라 바로 중단
+            if i == 3 or r.text.strip(): raise RuntimeError(f'JSON 아님: {r.text[:300]}')
         except requests.RequestException:
             if i == 3: raise
-            time.sleep(3 * 2 ** i)
+        time.sleep(3 * 2 ** i)
 
 
 def vw(layer, **flt):  # 브이월드 2D 데이터 (연속지적도, 용도지역, 읍면동)
