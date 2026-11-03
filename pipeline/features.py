@@ -80,6 +80,8 @@ def features(P, g, ref, sgg=None):
         unknown_ratio=(sum(o is None for o in olds) / len(pre)) if pre else None,
         age_mean=(sum(ages) / len(ages)) if ages else None,
         new_after_ref=len(post) / max(len(pre), 1),                     # 기준연도 이후 신축 비율 (지분쪼개기·사업 이탈 신호)
+        post_hh=sum(int(num(b.get('hhldCnt'))) for b in post),          # 기준연도 이후 생긴 세대수 → 크면 그 자리에 새 아파트 (사업 완료 확인용)
+        post_apt_y=min((year(b.get('useAprDay')) for b in post if num(b.get('hhldCnt')) >= 100), default=None),
         new5_before_ref=sum(1 for a in ages if a < 5) / max(len(pre), 1),
         jiphap_ratio=jip / max(len(pre), 1),                            # 다세대·연립 등 집합건물 비율
         owners=sum(p.get('ol', 0) for p in ps), owners_per_ha=sum(p.get('ol', 0) for p in ps) / ha,
@@ -155,9 +157,15 @@ def main():
             ref = int(str(r.get('ref') or r.get('rd') or '2012')[:4])
             f = features(P, circle(r['x'], r['y'], r.get('area') or 30000), min(max(ref, 2006), 2026))  # 위치=대표 지번 → 같은 면적의 원 (근사)
             if f: rows.append(dict(kind='released', name=r.get('n'), ref=ref, rd=r.get('rd'), zd=r.get('zd'), t=r.get('kind'), **f))
+    done = RAW / 'completed.json'  # 완료 추정 구역 (해제 이력 없이 진행 목록에서 빠진 곳) → 성공 사례 후보
+    if done.exists():
+        for r in json.loads(done.read_text(encoding='utf-8')):
+            if not r.get('x'): continue
+            f = features(P, circle(r['x'], r['y'], r.get('area') or 30000), min(max(r['ref'], 2006), 2026))
+            if f: rows.append(dict(kind='done', name=r.get('n'), ref=r['ref'], zd=r.get('zd'), dd=r.get('dd'), t=r.get('kind'), **f))
     out = RAW / 'zone_features.json'
     out.write_text(json.dumps(rows, ensure_ascii=False), encoding='utf-8')
-    print(f'구역 변수 {len(rows)}개 (진행 {sum(r["kind"] == "active" for r in rows)} · 해제 {sum(r["kind"] == "released" for r in rows)})', flush=True)
+    print(f'구역 변수 {len(rows)}개 (진행 {sum(r["kind"] == "active" for r in rows)} · 진행-원 {sum(r["kind"] == "active_c" for r in rows)} · 해제 {sum(r["kind"] == "released" for r in rows)} · 완료추정 {sum(r["kind"] == "done" for r in rows)})', flush=True)
     if os.environ.get('DUMP'): print('FEATDUMP', base64.b64encode(gzip.compress(json.dumps(rows, ensure_ascii=False).encode())).decode(), flush=True)
 
 

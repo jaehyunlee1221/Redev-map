@@ -96,10 +96,45 @@ def released(rows, loc, gap=None):
     return out
 
 
+def completed(rows, active, plus, loc):
+    """지정됐는데 해제 이력도 없고 지금 진행 목록에도 없는 구역 → 대부분 사업 완료(준공 후 목록에서 빠짐). 성공 사례 후보
+    (진짜 완료인지는 features에서 그 자리에 지정 뒤 새 공동주택이 생겼는지로 확인)"""
+    gus = set(loc.gus)
+    dead = {norm(r['RGN_NM']) for r in rows if r['RPT_TYPE'] in ('폐지', '실효')}
+    act = {norm(n) for n in active}
+    done = {norm(v.get('BSNS_NAME')): (v.get('PROPEL_DT') or '')[:10] for v in plus if '준공' in (v.get('PROPEL_CD_NM') or '')}
+    last_area = {}
+    for r in sorted(rows, key=ymd):
+        v = str(r.get('AREA_CHG_AFTR') or '')
+        if re.fullmatch(r'[\d.]+', v) and float(v) > 500: last_area[norm(r['RGN_NM'])] = float(v)
+    out, seen = [], set()
+    for r in sorted(rows, key=ymd):
+        d, nm, sc = ymd(r), (r.get('RGN_NM') or '').strip(), r.get('SCLSF') or ''
+        k = norm(nm)
+        if r['RPT_TYPE'] != '신설' or not ('1995' <= d <= '2018') or not k or k in seen: continue
+        if re.search('예정|존치|관리|리모델링|주거환경|개발행위|지형도면', nm + sc) or re.search('지구$', sc): continue
+        seen.add(k)
+        if k in dead or k in act or any(k in x or x in k for x in act if len(x) >= 3 and len(k) >= 3): continue
+        a = (r.get('PSTN_NM') or '').strip()
+        gu = r['LOGVM'] if r['LOGVM'] in gus else next((g for g in gus if g in a), None)
+        xy, how = loc.find(gu, a) if a else (None, None)
+        kind = '촉진' if '촉진' in nm else '재건축' if '재건축' in sc else '재개발'
+        out.append(dict(n=nm, a=a, gu=gu, t=sc, zd=f'{d[:4]}-{d[4:6]}-{d[6:]}', ref=int(d[:4]), dd=done.get(k) or None,
+                        area=last_area.get(k), x=xy and xy[0], y=xy and xy[1], loc=how, kind=kind))
+    print(f'완료 추정 {len(out)}개 (서울플랜+ 준공 확인 {sum(1 for o in out if o["dd"])}) · 위치 찾음 {sum(1 for o in out if o["x"])}', flush=True)
+    print('  지정연도:', dict(sorted(Counter(str(o['ref']) for o in out).items())), flush=True)
+    return out
+
+
 def main():
     data = {s: fetch(s) for s in SERVICES}
-    rel = released(data['upisRebuild'] + data['upisNewtown'], Locator())
+    loc = Locator()
+    rel = released(data['upisRebuild'] + data['upisNewtown'], loc)
     (RAW / 'released.json').write_text(json.dumps(rel, ensure_ascii=False), encoding='utf-8')
+    act = [r.get('ZONE_NM') for r in json.loads((RAW / 'redev_seoul.json').read_text(encoding='utf-8'))] if (RAW / 'redev_seoul.json').exists() else []
+    if act:
+        done = completed(data['upisRebuild'] + data['upisNewtown'], act, data['vnBsnsNmtn'], loc)
+        (RAW / 'completed.json').write_text(json.dumps(done, ensure_ascii=False), encoding='utf-8')
     for o in [o for o in rel if not o['x']][:15]: print('  위치 못 찾음:', o['n'], '|', o['a'], '|', o['gu'], flush=True)
 
 
