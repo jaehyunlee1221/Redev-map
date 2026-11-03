@@ -41,6 +41,14 @@ jobs:
         run: python -m pipeline.fetch "$REGION" bldgs 2>&1 | tee fetch.log; exit ${PIPESTATUS[0]}
         env:
           DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+      - name: market                        # 모델용: 아파트 실거래·지하철역 (실패해도 지도 빌드는 계속)
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 90
+        run: python -m pipeline.market 3000 2>&1 | tee market.log; exit ${PIPESTATUS[0]}
+        env:
+          DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+          SEOUL_API_KEY: ${{ secrets.SEOUL_API_KEY }}
       - uses: actions/cache/save@v4         # 일부 실패해도 받은 건 저장 → 다음 실행에서 이어받음
         if: always()
         with: { path: data/raw, key: 'raw-${{ github.run_id }}' }
@@ -73,7 +81,7 @@ jobs:
         run: |
           python - <<'EOF'
           import pathlib
-          for n in ('fetch', 'build', 'redev'):
+          for n in ('fetch', 'market', 'build', 'redev'):
               p = pathlib.Path(f'{n}.log')
               if p.exists():
                   t = p.read_text(errors='replace')[-3000:].replace('%', '%25').replace('\r', '').replace('\n', '%0A')
