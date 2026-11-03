@@ -1,5 +1,5 @@
 """seed(브이월드) + raw(건축물대장) → site/data/{법정동}.geojson (필지별 지표) + dongs.geojson (동 경계·요약)"""
-import sys, json, math, re
+import os, sys, json, math, re
 from collections import defaultdict
 from shapely.geometry import shape, mapping
 from shapely import STRtree, set_precision, make_valid
@@ -21,6 +21,9 @@ def m2(g):  # 위경도 면적 → ㎡ (근사)
     return g.area * 111320 * 110540 * math.cos(math.radians(g.centroid.y))
 
 
+KEEP = {'nb', 'ol', 'oh', 'no', 'nn', 'pub'}  # 0이어도 남길 속성 (지도 색칠에 씀)
+
+
 def build_dong(sgg, p10, parcels):
     zs = [(shape(f['geometry']), f['properties'].get('uname', '')) for f in rd(sgg, f'{p10}_zones.json') or []]
     tree = STRtree([g for g, _ in zs])
@@ -38,9 +41,18 @@ def build_dong(sgg, p10, parcels):
         o = own.get(pnu) or dict(ol=None, oh=None, pub=0, ar=round(m2(g), 1), jm=re.sub(r'^[\d\-\s산]+', '', jb), gj=0, cg='')
         p = dict(p=pnu, j=jb, z=z, **o, **agg_bldgs(bld.get(pnu, [])), cx=round(pt.x, 6), cy=round(pt.y, 6))
         if p['ol'] is None: p['ol'] = p['oh'] = 0 if p['pub'] else max(p['ho'], 1); p['oe'] = 1  # 소유정보 없음 → 호수 또는 1인
-        feats.append(dict(type='Feature', geometry=snap(g), properties=p))
-    dump(OUT / f'{p10}.geojson', feats)
-    s = lambda k: sum(x['properties'][k] for x in feats)
+        if p['ar'] and p['va']: p['fr'] = round(p['va'] / p['ar'] * 100)  # 현재 용적률(%)
+        feats.append(dict(type='Feature', geometry=snap(g), properties={k: v for k, v in p.items() if v not in (None, '', 0) or k in KEEP}))
+    (OUT / 'p').mkdir(exist_ok=True)  # 구역 그리기 통계용: 속성만 (지도 표시는 벡터타일)
+    (OUT / 'p' / f'{p10}.json').write_text(json.dumps([f['properties'] for f in feats], ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    with open(OUT / 'parcels.ndjson', 'a', encoding='utf-8') as nd:  # → tippecanoe → parcels.pmtiles
+        for f in feats:
+            nd.write(json.dumps(f, ensure_ascii=False, separators=(',', ':')) + '\n')
+            if f['properties'].get('j'):  # 지번 라벨용 점 (다른 레이어)
+                nd.write(json.dumps(dict(type='Feature', tippecanoe=dict(layer='lb', minzoom=15), properties=dict(j=f['properties']['j']),
+                                         geometry=dict(type='Point', coordinates=[f['properties']['cx'], f['properties']['cy']])),
+                                    ensure_ascii=False, separators=(',', ':')) + '\n')
+    s = lambda k: sum(x['properties'].get(k, 0) for x in feats)
     return dict(np=len(feats), nb=s('nb'), no=s('no'), nu=s('nu'), ol=s('ol'), oe=sum(x['properties'].get('oe', 0) for x in feats))
 
 
@@ -48,6 +60,7 @@ def main(arg):
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / 'dongs.geojson'
     dongs = {f['properties']['c']: f for f in json.loads(path.read_text(encoding='utf-8'))['features']} if path.exists() else {}
+    (OUT / 'parcels.ndjson').unlink(missing_ok=True)
     for sgg in regions(arg):
         for f in rd(sgg, 'dongs.json') or []:
             pr, g = f['properties'], shape(f['geometry'])
@@ -64,6 +77,8 @@ def main(arg):
     if (SEED / 'redev.json.gz').exists():  # 건축규제 구역 오버레이 (UD210)
         dump(OUT / 'redev.geojson', rd('', 'redev.json'))
     dump(path, list(dongs.values()))
+    import time  # 데이터 버전: 바뀌면 브라우저가 캐시를 버리고 새로 받음
+    (OUT / 'version.json').write_text(json.dumps(dict(v=os.environ.get('GITHUB_RUN_ID') or str(int(time.time())))), encoding='utf-8')
 
 
 if __name__ == '__main__':

@@ -63,11 +63,14 @@ def test_end_to_end(tmp_path, monkeypatch):
     assert [p.name for p in (raw / '99999').iterdir()] == ['9999910100_bldgs.json']
 
     build.main('seeded')
-    fs = {f['properties']['p'][-8:-4]: f['properties'] for f in json.loads((out / '9999910100.geojson').read_text())['features']}
+    fs = {p['p'][-8:-4]: p for p in json.loads((out / 'p' / '9999910100.json').read_text())}
+    nd = [json.loads(l) for l in (out / 'parcels.ndjson').read_text().splitlines()]
+    assert len([f for f in nd if 'tippecanoe' not in f]) == 3 and nd[0]['geometry']['type'] == 'Polygon'
     assert fs['0001']['z'] == '제2종일반주거지역' and fs['0001']['no'] == 1 and fs['0001']['ol'] == 1 and fs['0001']['oh'] == 2
     assert 'oe' not in fs['0001']
     assert fs['0002']['ol'] == 6 and fs['0002']['oe'] == 1 and fs['0002']['jm'] == '대'   # 소유정보 없음 → 집합 호수
     assert fs['0003']['nb'] == 0 and 60 < fs['0003']['ar'] < 1000
+    assert json.loads((out / 'version.json').read_text())['v']
     dg = json.loads((out / 'dongs.geojson').read_text())['features'][0]['properties']
     assert (dg['n'], dg['nb'], dg['no'], dg['r'], dg['oe']) == ('테스트동', 2, 1, 0.5, 2)
 

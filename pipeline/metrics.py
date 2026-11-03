@@ -36,6 +36,7 @@ def agg_bldgs(bs):  # 주건축물만
     return dict(nb=len(m), no=sum(o is True for o in old), nu=sum(o is None for o in old),
                 nn=sum(YEAR - y < R['new_years'] for y in ys),
                 ta=round(sum(num(b.get('totArea')) for b in m)),
+                va=round(sum(num(b.get('vlRatEstmTotArea')) or num(b.get('totArea')) for b in m)),  # 용적률 산정 연면적
                 oa=round(sum(num(b.get('totArea')) for b, o in zip(m, old) if o)),
                 ho=sum(int(num(b.get('hoCnt'))) for b in m if '집합' in (b.get('regstrGbCdNm') or '')),
                 hh=sum(int(num(b.get('hhldCnt')) + num(b.get('fmlyCnt'))) for b in m),

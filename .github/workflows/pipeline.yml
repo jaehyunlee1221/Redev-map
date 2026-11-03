@@ -53,6 +53,21 @@ jobs:
         env:
           SEOUL_API_KEY: ${{ secrets.SEOUL_API_KEY }}
           DUMP: '1'
+      - uses: actions/cache@v4              # 벡터타일 도구 (한 번 빌드해 두고 재사용)
+        id: tc
+        with: { path: ~/tippecanoe, key: tippecanoe-2.79.0 }
+      - name: tippecanoe 설치
+        if: steps.tc.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get install -y -q libsqlite3-dev zlib1g-dev >/dev/null
+          git clone -q --depth 1 --branch 2.79.0 https://github.com/felt/tippecanoe.git /tmp/tc
+          make -C /tmp/tc -j4 >/dev/null && mkdir -p ~/tippecanoe && cp /tmp/tc/tippecanoe ~/tippecanoe/
+      - name: tiles                         # 필지 → 벡터타일 (지도에서 확대·이동이 빠름)
+        if: always()
+        run: |
+          ~/tippecanoe/tippecanoe -q -o site/data/parcels.pmtiles -l parcels -Z14 -z15 --no-tile-size-limit --no-feature-limit \
+            --no-tiny-polygon-reduction --force site/data/parcels.ndjson
+          rm site/data/parcels.ndjson; du -sh site/data/parcels.pmtiles site/data/p | tee -a build.log
       - name: report                        # 로그 끝부분을 annotation으로 남김 (로그인 없이 API로 조회 가능)
         if: always()
         run: |
