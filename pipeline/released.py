@@ -82,7 +82,7 @@ def released(rows, loc, gap=None):
         a = (r.get('PSTN_NM') or '').strip()
         gu = r['LOGVM'] if r['LOGVM'] in gus else next((g for g in gus if g in a), None)
         xy, how = loc.find(gu, a) if a else (None, None)
-        area = next((float(v) for v in (r.get('AREA_EXS'), r.get('AREA_CHG')) if re.fullmatch(r'[\d.]+', v or '') and float(v) > 500), None)
+        area = next((float(v) for v in map(str, (r.get('AREA_EXS'), r.get('AREA_CHG'))) if re.fullmatch(r'[\d.]+', v) and float(v) > 500), None)
         sc = r.get('SCLSF') or ''
         kind = ('예정' if '예정' in nm else '관리' if re.search('주거환경', sc + nm) else '촉진' if '촉진' in nm else
                 '재건축' if '재건축' in sc else '재개발')

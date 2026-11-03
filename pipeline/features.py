@@ -9,6 +9,7 @@ from shapely import STRtree
 from shapely.affinity import scale
 from .common import RAW, OUT, rd, regions
 from .metrics import pnu_of, year, num, R
+from .released import norm
 
 FAR = {'제1종전용주거지역': 100, '제2종전용주거지역': 120, '제1종일반주거지역': 150, '제2종일반주거지역': 200, '제3종일반주거지역': 250,
        '준주거지역': 400, '중심상업지역': 1000, '일반상업지역': 800, '근린상업지역': 600, '유통상업지역': 600,
@@ -109,25 +110,44 @@ def circle(x, y, area_m2):  # 면적이 같은 원 (위경도 비율 보정)
     return scale(Point(x, y).buffer(r / kx, 32), 1, kx / ky, origin=(x, y))
 
 
+def zone_areas():
+    """구역 이름(정규화) → 면적㎡: 서울플랜+ 정비사업 현황, 없으면 정비구역 결정고시 이력의 마지막 변경 후 면적"""
+    out = {}
+    up = lambda n: json.loads((RAW / 'upis' / f'{n}.json').read_text(encoding='utf-8')) if (RAW / 'upis' / f'{n}.json').exists() else []
+    for r in sorted(up('upisRebuild') + up('upisNewtown'), key=lambda r: r['RPT_MNG_CD'][8:16]):
+        v = str(r.get('AREA_CHG_AFTR') or '')
+        if r['RPT_TYPE'] not in ('폐지', '실효') and re.fullmatch(r'[\d.]+', v) and float(v) > 500: out[norm(r['RGN_NM'])] = float(v)
+    for r in up('vnBsnsNmtn'):
+        if (r.get('AREA') or 0) > 500: out[norm(r.get('BSNS_NAME'))] = float(r['AREA'])
+    out.pop('', None)
+    return out
+
+
 def main():
     P = Parcels()
     print(f'필지 {len(P.props)} · 건물 {sum(map(len, P.bld.values()))} · 역 {len(P.st)} · 실거래 요약 {len(P.mk)}', flush=True)
     zs = json.loads((OUT / 'zones.geojson').read_text(encoding='utf-8'))['features']
     polys = {f['properties']['zi']: shape(f['geometry']) for f in json.loads((OUT / 'zonepoly.geojson').read_text(encoding='utf-8'))['features']
              if 'zi' in f['properties']} if (OUT / 'zonepoly.geojson').exists() else {}
+    area = zone_areas()
     rows = []
     for i, z in enumerate(zs):
         pr = z['properties']
         ref = int((pr.get('zd') or pr.get('cm') or pr.get('jo') or '2026')[:4])
         ref = min(max(ref, 2006), 2026)
-        g = polys.get(i)
-        if g is None: continue
-        f = features(P, g, ref)
         meta = {k: pr.get(k) for k in ('t', 's', 'si', 'pp', 'gp', 'eh', 'bh', 'zd', 'cm', 'jo', 'sa', 'gc', 'ij', 'cs')}
-        if f: rows.append(dict(kind='active', id=i, name=pr.get('n'), ref=ref, **meta, **f))
-        a = g.area * m_per_deg(g.centroid.y)[0] * m_per_deg(g.centroid.y)[1]  # 해제구역과 같은 방식(원)으로도 계산 → 비교용
-        f = features(P, circle(g.centroid.x, g.centroid.y, a), ref)
-        if f: rows.append(dict(kind='active_c', id=i, name=pr.get('n'), ref=ref, **meta, **f))
+        g = polys.get(i)
+        if g is not None:
+            f = features(P, g, ref)
+            if f: rows.append(dict(kind='active', id=i, name=pr.get('n'), ref=ref, **meta, **f))
+            a, src = g.area * m_per_deg(g.centroid.y)[0] * m_per_deg(g.centroid.y)[1], '경계'
+            x, y = g.centroid.x, g.centroid.y
+        else:  # 경계가 아직 없으면(토지이용계획 미수집) 서울시 고시 면적으로 원
+            a, src = area.get(norm(pr.get('n'))), '고시'
+            x, y = z['geometry']['coordinates']
+            if not a: continue
+        f = features(P, circle(x, y, a), ref)  # 해제구역과 같은 방식(원) → 비교용
+        if f: rows.append(dict(kind='active_c', id=i, name=pr.get('n'), ref=ref, area_src=src, **meta, **f))
     rel = RAW / 'released.json'  # 해제구역 (pipeline.released: 서울시 정비구역 결정고시 이력의 폐지·실효)
     if rel.exists():
         for r in json.loads(rel.read_text(encoding='utf-8')):
