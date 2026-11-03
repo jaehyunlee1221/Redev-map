@@ -1,0 +1,145 @@
+"""정비사업 성공가능성 모델용 구역 변수 (GitHub에서 실행: 건축물대장 원본이 여기 있음)
+  구역 = 정비구역 경계(zonepoly) 또는 해제구역(위치+면적 → 같은 면적의 원)
+  기준연도(ref) 시점으로 노후도·건물수를 다시 계산 → 해제 뒤 새로 지은 빌라가 '해제라서 노후도 낮음'으로 섞이지 않게
+  python -m pipeline.features  → data/raw/zone_features.json (+ DUMP=1이면 로그로)"""
+import os, re, json, math, gzip, base64
+from collections import defaultdict
+from shapely.geometry import shape, Point
+from shapely import STRtree
+from shapely.affinity import scale
+from .common import RAW, OUT, rd, regions
+from .metrics import pnu_of, year, num, R
+
+FAR = {'제1종전용주거지역': 100, '제2종전용주거지역': 120, '제1종일반주거지역': 150, '제2종일반주거지역': 200, '제3종일반주거지역': 250,
+       '준주거지역': 400, '중심상업지역': 1000, '일반상업지역': 800, '근린상업지역': 600, '유통상업지역': 600,
+       '전용공업지역': 200, '일반공업지역': 200, '준공업지역': 400, '보전녹지지역': 50, '생산녹지지역': 50, '자연녹지지역': 50}
+LANDMARK = dict(cityhall=(126.9780, 37.5665), gangnam=(127.0276, 37.4979), yeouido=(126.9246, 37.5219))
+m_per_deg = lambda y: (111320 * math.cos(math.radians(y)), 110540)
+
+
+def dist_m(a, b):
+    kx, ky = m_per_deg((a[1] + b[1]) / 2)
+    return math.hypot((a[0] - b[0]) * kx, (a[1] - b[1]) * ky)
+
+
+class Parcels:
+    """모든 구의 필지 대표점 + 속성(빌드 결과 site/data/p) + 원본 건물(data/raw bldgs)을 공간 색인"""
+    def __init__(self):
+        self.props, pts = [], []
+        for f in sorted((OUT / 'p').glob('*.json')):
+            for p in json.loads(f.read_text(encoding='utf-8')):
+                self.props.append(p); pts.append(Point(p['cx'], p['cy']))
+        self.tree = STRtree(pts)
+        self.bld = defaultdict(list)
+        for sgg in regions('seeded'):
+            for d in rd(sgg, 'dongs.json') or []:
+                for b in rd(sgg, f"{d['properties']['emd_cd']}00_bldgs.json") or []:
+                    if str(b.get('mainAtchGbCd', '0')) == '0': self.bld[pnu_of(b)].append(b)
+        st = RAW / 'stations.json'
+        self.st = json.loads(st.read_text(encoding='utf-8')) if st.exists() else []
+        mk = RAW / 'market.json'
+        self.mk = json.loads(mk.read_text(encoding='utf-8')) if mk.exists() else {}
+
+    def inside(self, g):
+        return [self.props[i] for i in self.tree.query(g, predicate='contains')]
+
+
+def old_at(b, ref):  # ref년 기준 노후 여부 (그때 있던 건물만)
+    y = year(b.get('useAprDay'))
+    if y is None: return None
+    rc = any(k in (b.get('strctCdNm') or '') for k in R['rc_keywords'])
+    return ref - y >= R['old_years']['rc' if rc else 'other']
+
+
+def features(P, g, ref, sgg=None):
+    ps = P.inside(g)
+    if not ps: return None
+    ar = sum(p.get('ar', 0) for p in ps) or 1
+    ha = ar / 1e4
+    bs = [b for p in ps for b in P.bld.get(p['p'], [])]
+    pre = [b for b in bs if (year(b.get('useAprDay')) or 0) <= ref]       # 기준연도에 이미 있던 건물 (미상 포함)
+    post = [b for b in bs if (year(b.get('useAprDay')) or 0) > ref]
+    olds = [old_at(b, ref) for b in pre]
+    ages = [ref - year(b.get('useAprDay')) for b in pre if year(b.get('useAprDay'))]
+    dae = [p for p in ps if p.get('jm') == '대']
+    zs = defaultdict(float)
+    for p in ps: zs[p.get('z') or '미상'] += p.get('ar', 0)
+    far_allow = sum(FAR.get(z, 0) * a for z, a in zs.items()) / ar
+    far_now = sum(num(b.get('vlRatEstmTotArea')) or num(b.get('totArea')) for b in pre) / ar * 100
+    c = g.centroid
+    gj = [p['gj'] for p in ps if p.get('gj')]
+    st = min((dist_m((c.x, c.y), (s['x'], s['y'])) for s in P.st), default=None)
+    sg = sgg or ps[0]['p'][:5]
+    mk = lambda key: P.mk.get(key) or {}
+    m_gu = next((mk(f'{sg}|{y}') for y in range(ref, ref + 4) if mk(f'{sg}|{y}')), {})
+    jip = sum(1 for b in pre if '집합' in (b.get('regstrGbCdNm') or ''))
+    f = dict(
+        area_ha=round(ha, 3), n_parcel=len(ps), n_bldg=len(pre), bldg_per_ha=len(pre) / ha,
+        old_ratio=(sum(o is True for o in olds) / len(pre)) if pre else None,
+        unknown_ratio=(sum(o is None for o in olds) / len(pre)) if pre else None,
+        age_mean=(sum(ages) / len(ages)) if ages else None,
+        new_after_ref=len(post) / max(len(pre), 1),                     # 기준연도 이후 신축 비율 (지분쪼개기·사업 이탈 신호)
+        new5_before_ref=sum(1 for a in ages if a < 5) / max(len(pre), 1),
+        jiphap_ratio=jip / max(len(pre), 1),                            # 다세대·연립 등 집합건물 비율
+        owners=sum(p.get('ol', 0) for p in ps), owners_per_ha=sum(p.get('ol', 0) for p in ps) / ha,
+        owners_hi=sum(p.get('oh', 0) for p in ps),
+        hh_per_ha=sum(int(num(b.get('hhldCnt')) + num(b.get('fmlyCnt'))) for b in pre) / ha,
+        small_ratio=(sum(1 for p in dae if p.get('ar', 0) < R['small_parcel_m2']) / len(dae)) if dae else None,
+        pub_ratio=sum(p.get('ar', 0) for p in ps if p.get('pub')) / ar,
+        road_ratio=sum(p.get('ar', 0) for p in ps if p.get('jm') == '도로') / ar,
+        dae_ratio=sum(p.get('ar', 0) for p in dae) / ar,
+        far_allow=far_allow, far_now=far_now, far_room=far_allow - far_now,
+        z1=zs.get('제1종일반주거지역', 0) / ar + zs.get('제1종전용주거지역', 0) / ar + zs.get('제2종전용주거지역', 0) / ar,
+        z2=zs.get('제2종일반주거지역', 0) / ar, z3=zs.get('제3종일반주거지역', 0) / ar,
+        zcom=sum(a for z, a in zs.items() if '상업' in z or '준주거' in z) / ar, zgreen=sum(a for z, a in zs.items() if '녹지' in z) / ar,
+        gj_med=sorted(gj)[len(gj) // 2] if gj else None,
+        lu_plan=sum(p.get('ar', 0) for p in ps if '지구단위' in (p.get('lu') or '')) / ar,
+        lu_heritage=sum(p.get('ar', 0) for p in ps if re.search('문화|역사|고도|경관', p.get('lu') or '')) / ar,
+        station_m=st,
+        **{f'{k}_km': dist_m((c.x, c.y), v) / 1000 for k, v in LANDMARK.items()},
+        apt_gu=m_gu.get('m'), apt_gu_new=m_gu.get('mn'),
+        seoul=int(sg.startswith('11')), sgg=sg, cx=round(c.x, 6), cy=round(c.y, 6))
+    if f['apt_gu_new'] and f['gj_med']: f['price_gap'] = f['apt_gu_new'] * 1e4 / f['gj_med']  # 신축 아파트 ㎡가 / 공시지가 ㎡가 → 사업성 근사
+    return {k: (round(v, 4) if isinstance(v, float) else v) for k, v in f.items()}
+
+
+def circle(x, y, area_m2):  # 면적이 같은 원 (위경도 비율 보정)
+    r = math.sqrt(max(area_m2, 1000) / math.pi)
+    kx, ky = m_per_deg(y)
+    return scale(Point(x, y).buffer(r / kx, 32), 1, kx / ky, origin=(x, y))
+
+
+def main():
+    P = Parcels()
+    print(f'필지 {len(P.props)} · 건물 {sum(map(len, P.bld.values()))} · 역 {len(P.st)} · 실거래 요약 {len(P.mk)}', flush=True)
+    zs = json.loads((OUT / 'zones.geojson').read_text(encoding='utf-8'))['features']
+    polys = {f['properties']['zi']: shape(f['geometry']) for f in json.loads((OUT / 'zonepoly.geojson').read_text(encoding='utf-8'))['features']
+             if 'zi' in f['properties']} if (OUT / 'zonepoly.geojson').exists() else {}
+    rows = []
+    for i, z in enumerate(zs):
+        pr = z['properties']
+        ref = int((pr.get('zd') or pr.get('cm') or pr.get('jo') or '2026')[:4])
+        ref = min(max(ref, 2006), 2026)
+        g = polys.get(i)
+        if g is None: continue
+        f = features(P, g, ref)
+        meta = {k: pr.get(k) for k in ('t', 's', 'si', 'pp', 'gp', 'eh', 'bh', 'zd', 'cm', 'jo', 'sa', 'gc', 'ij', 'cs')}
+        if f: rows.append(dict(kind='active', id=i, name=pr.get('n'), ref=ref, **meta, **f))
+        a = g.area * m_per_deg(g.centroid.y)[0] * m_per_deg(g.centroid.y)[1]  # 해제구역과 같은 방식(원)으로도 계산 → 비교용
+        f = features(P, circle(g.centroid.x, g.centroid.y, a), ref)
+        if f: rows.append(dict(kind='active_c', id=i, name=pr.get('n'), ref=ref, **meta, **f))
+    rel = RAW / 'released.json'  # 해제구역 (사용자 제공 목록 → pipeline.released가 위치 매칭)
+    if rel.exists():
+        for r in json.loads(rel.read_text(encoding='utf-8')):
+            if not r.get('x'): continue
+            ref = int(str(r.get('ref') or r.get('rd') or '2012')[:4])
+            f = features(P, circle(r['x'], r['y'], r.get('area') or 30000), min(max(ref, 2006), 2026))
+            if f: rows.append(dict(kind='released', name=r.get('n'), ref=ref, rd=r.get('rd'), **f))
+    out = RAW / 'zone_features.json'
+    out.write_text(json.dumps(rows, ensure_ascii=False), encoding='utf-8')
+    print(f'구역 변수 {len(rows)}개 (진행 {sum(r["kind"] == "active" for r in rows)} · 해제 {sum(r["kind"] == "released" for r in rows)})', flush=True)
+    if os.environ.get('DUMP'): print('FEATDUMP', base64.b64encode(gzip.compress(json.dumps(rows, ensure_ascii=False).encode())).decode(), flush=True)
+
+
+if __name__ == '__main__':
+    main()
