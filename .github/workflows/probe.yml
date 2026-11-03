@@ -1,0 +1,12 @@
+name: probe
+on:
+  workflow_dispatch:
+    inputs:
+      args: { description: '데이터셋 ID들', default: 'OA-23112 OA-23113 OA-23114 OA-23115 OA-2254' }
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -q requests && python tools/probe_seoul.py ${{ inputs.args }}
+        env: { SEOUL_API_KEY: '${{ secrets.SEOUL_API_KEY }}' }
