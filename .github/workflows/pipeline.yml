@@ -52,6 +52,7 @@ jobs:
         run: python -m pipeline.redev 2>&1 | tee redev.log; exit ${PIPESTATUS[0]}
         env:
           SEOUL_API_KEY: ${{ secrets.SEOUL_API_KEY }}
+          DUMP: '1'
       - name: report                        # 로그 끝부분을 annotation으로 남김 (로그인 없이 API로 조회 가능)
         if: always()
         run: |

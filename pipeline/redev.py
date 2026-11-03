@@ -107,7 +107,14 @@ def main():
         print(f'서울 정비사업 API 실패 → 지난번 받은 것 사용: {e}', flush=True)
         rows = json.loads(cache.read_text(encoding='utf-8')) if cache.exists() else []
     if rows and len(rows) <= 5: print('SEOUL_API_KEY 없음 → 예시 5건만 (GitHub Secrets에 SEOUL_API_KEY 등록 필요)', flush=True)
-    if rows: print('예시 행:', json.dumps(rows[0], ensure_ascii=False)[:800], flush=True)
+    if rows:
+        print('예시 행:', json.dumps(rows[0], ensure_ascii=False)[:800], flush=True)
+        from collections import Counter
+        print('단계별:', dict(Counter((r.get('BIZ_STAGE') or '').strip() for r in rows).most_common()), flush=True)
+        print('유형별:', dict(Counter((r.get('BIZ_TYPE') or '').strip() for r in rows).most_common()), flush=True)
+        if os.environ.get('DUMP'):  # 분석용: 원본 행을 압축해 로그로 (공개 데이터)
+            import gzip, base64
+            print('RAWDUMP', base64.b64encode(gzip.compress(json.dumps(rows, ensure_ascii=False).encode())).decode(), flush=True)
     loc = Locator()
     feats = [z for z in (zone(r, loc) for r in rows) if z]
     OUT.mkdir(parents=True, exist_ok=True)
