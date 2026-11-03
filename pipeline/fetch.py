@@ -12,10 +12,11 @@ from .metrics import agg_owners, unit, LAND
 
 VW = 'https://api.vworld.kr/req/data'
 NED = 'https://api.vworld.kr/ned/data/getPossessionAttr'
+LU = 'https://api.vworld.kr/ned/data/getLandUseAttr'  # 토지이용계획 (필지별 용도지역·지구·구역: 정비구역 여부 등)
 BH = 'https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo'
 VK, DK, DOM = (os.environ.get(k, '') for k in ('VWORLD_KEY', 'DATA_GO_KR_KEY', 'VWORLD_DOMAIN'))
-DAYS = dict(dongs=90, parcels=90, zones=90, owners=30, bldgs=25)  # 이 기간 안에 받은 파일은 건너뜀
-VER = dict(owners=2)  # 집계 방식이 바뀌면 올림 → 예전 파일은 기한 내라도 다시 받음
+DAYS = dict(dongs=90, parcels=90, zones=90, owners=30, landuse=60, bldgs=25)  # 이 기간 안에 받은 파일은 건너뜀
+VER = dict(owners=2, landuse=1)  # 집계 방식이 바뀌면 올림 → 예전 파일은 기한 내라도 다시 받음
 ERR = []
 
 
@@ -52,12 +53,15 @@ def vw(layer, **flt):  # 브이월드 2D 데이터 (연속지적도, 용도지�
         page += 1
 
 
-def ned(pnu):  # 토지소유정보 (PNU 앞자리로 조회)
+def body(j):  # NED 응답의 본문 ({possessions|landUses|...: {field, totalCount}})
+    return next((v for v in j.values() if isinstance(v, dict) and ('field' in v or 'totalCount' in v)), j)
+
+
+def ned(pnu, url=NED):  # 토지소유정보·토지이용계획 (PNU 앞자리로 조회)
     out, page = [], 1
     while True:
-        j = get(NED, key=VK, domain=DOM, pnu=pnu, format='json', numOfRows=1000, pageNo=page)
-        j = j.get('possessions', j)
-        if 'field' not in j and 'totalCount' not in j: limit(j); raise RuntimeError(f'토지소유정보 {pnu}: {str(j)[:300]}')
+        j = body(get(url, key=VK, domain=DOM, pnu=pnu, format='json', numOfRows=1000, pageNo=page))
+        if 'field' not in j and 'totalCount' not in j: limit(j); raise RuntimeError(f'{url.rsplit("/", 1)[-1]} {pnu}: {str(j)[:300]}')
         rows = j.get('field') or []
         out += rows
         if not rows or len(out) >= int(j['totalCount']): return out  # 페이지당 건수가 요청보다 적어도 끝까지
@@ -99,6 +103,17 @@ def owners(p10):
         else:
             for u in us: owner_of.setdefault(u, pnu)
         out[pnu] = o
+    return out
+
+
+def landuse(p10):
+    """필지별 [코드, 저촉여부] 목록 + 코드표. 원본은 필지당 여러 줄(용도지역·지구·구역마다 한 줄)"""
+    out, names = {'_v': VER['landuse']}, {}
+    for r in ned(p10, LU):
+        c = r.get('prposAreaDstrcCode') or ''
+        names[c] = r.get('prposAreaDstrcCodeNm') or ''
+        out.setdefault(r['pnu'], []).append([c, r.get('cnflcAt') or ''])
+    out['_c'] = names
     return out
 
 
@@ -151,7 +166,9 @@ def check(sgg):
     pnu = one['result']['featureCollection']['features'][0]['properties']['pnu'] if one['status'] == 'OK' else p10
     for q in (p10, pnu):
         t(f'토지소유정보 pnu={q}', lambda: (lambda j: f"총 {j.get('totalCount')}건, 예시 {(j.get('field') or [{}])[0]}")(
-            get(NED, key=VK, domain=DOM, pnu=q, format='json', numOfRows=1, pageNo=1).get('possessions', {})))
+            body(get(NED, key=VK, domain=DOM, pnu=q, format='json', numOfRows=1, pageNo=1))))
+    t(f'토지이용계획 pnu={pnu}', lambda: (lambda j: f"총 {j.get('totalCount')}건, 예시 {(j.get('field') or [])[:3]}")(
+        body(get(LU, key=VK, domain=DOM, pnu=pnu, format='json', numOfRows=20, pageNo=1))))
     if DK: t('건축물대장', lambda: f"{len(bh(sgg, p10[5:]))}건")
 
 
@@ -184,7 +201,8 @@ def collect(arg, mode):
                                              for x in vw('LP_PA_CBND_BUBUN', attrFilter=f'pnu:like:{p10}')
                                              if x['properties']['pnu'].startswith(p10)],
                             zones=lambda: [feat(x, 6, uname=x['properties'].get('uname', '')) for x in vw('LT_C_UQ111', geomFilter=box)],
-                            owners=lambda: owners(p10))
+                            owners=lambda: owners(p10),
+                            landuse=lambda: landuse(p10))
             else:
                 base, ext = RAW / sgg, '.json'
                 jobs = dict(bldgs=lambda: bh(sgg, emd[5:] + '00'))

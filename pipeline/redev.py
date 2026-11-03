@@ -4,8 +4,10 @@
   python -m pipeline.redev"""
 import os, re, json, sys
 import requests
-from shapely.geometry import shape
-from .common import OUT, RAW, rd
+from shapely.geometry import shape, mapping, Point
+from shapely.ops import unary_union
+from shapely import STRtree, set_precision
+from .common import OUT, RAW, rd, regions
 
 URL = 'http://openapi.seoul.go.kr:8088/{key}/json/TbSeoulRedevStatus/{a}/{b}/'
 STAGES = ('구역지정', '추진위', '조합설립', '건축심의', '사업시행', '관리처분', '이주', '착공', '준공')
@@ -97,6 +99,47 @@ def zone(r, loc):
     return dict(type='Feature', geometry=dict(type='Point', coordinates=xy), properties={k: v for k, v in p.items() if v not in (None, '')})
 
 
+ZRE = re.compile(r'정비구역|촉진구역')  # 토지이용계획에서 정비구역(도시정비법)·재정비촉진구역(뉴타운)
+
+
+def zone_polys(feats, loc):
+    """토지이용계획상 정비구역 필지 → 붙어 있는 것끼리 묶어 구역 경계. 정비사업 점과 매칭(같은 덩어리에 여러 구역이면 가까운 점으로 나눔)
+    → (경계 features, 매칭된 점 index별 경계 대표점)"""
+    ps = []
+    for sgg in regions('seeded'):
+        for d in rd(sgg, 'dongs.json') or []:
+            p10 = d['properties']['emd_cd'] + '00'
+            lu = rd(sgg, f'{p10}_landuse.json')
+            if not lu: continue
+            codes = {c for c, n in lu.get('_c', {}).items() if ZRE.search(n or '')}
+            if not codes: continue
+            par = loc.parcels(p10)
+            ps += [shape(par[k]['geometry']) for k, v in lu.items() if not k.startswith('_') and k in par and any(c in codes for c, _ in v)]
+    if not ps: return [], {}
+    blobs = unary_union([g.buffer(3e-5) for g in ps])  # 도로 하나 정도 떨어진 건 같은 덩어리 (~3m)
+    blobs = list(getattr(blobs, 'geoms', [blobs]))
+    pts = [Point(f['geometry']['coordinates']) for f in feats]
+    bt, out, rep = STRtree(blobs), [], {}
+    member = {}
+    for i, pt in enumerate(pts):  # 점 → 덩어리 (안에 있거나 100m 이내 가장 가까운 것)
+        j = bt.nearest(pt)
+        if blobs[j].distance(pt) < 1e-3: member.setdefault(int(j), []).append(i)
+    pt_tree = {j: STRtree([pts[i] for i in m]) for j, m in member.items()}
+    groups = {}
+    for g in ps:
+        hit = bt.query(g.representative_point(), predicate='within')
+        j = int(hit[0]) if len(hit) else int(bt.nearest(g))
+        k = member[j][int(pt_tree[j].nearest(g.representative_point()))] if j in member else ('x', j)
+        groups.setdefault(k, []).append(g)
+    for k, gs in groups.items():
+        u = set_precision(unary_union([g.buffer(2e-6) for g in gs]).buffer(-2e-6).simplify(2e-6), 1e-6)
+        if u.is_empty: continue
+        pr = {x: feats[k]['properties'][x] for x in ('n', 's', 'si', 'gu', 't') if x in feats[k]['properties']} if isinstance(k, int) else dict(n='정비구역', si=-1)
+        if isinstance(k, int): pr['zi'] = k; rep[k] = u
+        out.append(dict(type='Feature', geometry=mapping(u), properties=pr))
+    return out, rep
+
+
 def main():
     cache = RAW / 'redev_seoul.json'
     try:
@@ -118,6 +161,14 @@ def main():
     loc = Locator()
     feats = [z for z in (zone(r, loc) for r in rows) if z]
     OUT.mkdir(parents=True, exist_ok=True)
+    polys, rep = zone_polys(feats, loc)
+    for k, u in rep.items():  # 점이 경계 밖이면(주소가 '근처'였던 것) 경계 안으로 옮김
+        if not u.buffer(1e-5).contains(Point(feats[k]['geometry']['coordinates'])):
+            pt = u.representative_point()
+            feats[k]['geometry']['coordinates'] = [round(pt.x, 6), round(pt.y, 6)]; feats[k]['properties']['loc'] = '경계'
+    (OUT / 'zonepoly.geojson').write_text(json.dumps(dict(type='FeatureCollection', features=polys), ensure_ascii=False,
+                                                      separators=(',', ':')), encoding='utf-8')
+    print(f'정비구역 경계 {len(polys)}개 (사업 정보와 매칭 {len(rep)}개)', flush=True)
     (OUT / 'zones.geojson').write_text(json.dumps(dict(type='FeatureCollection', features=feats), ensure_ascii=False,
                                                   separators=(',', ':')), encoding='utf-8')
     print(f'정비사업 {len(rows)}개 중 {len(feats)}개 지도에 표시 (나머지는 아직 수집 안 된 구이거나 지번 불명)', flush=True)

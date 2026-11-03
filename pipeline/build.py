@@ -21,6 +21,7 @@ def m2(g):  # 위경도 면적 → ㎡ (근사)
     return g.area * 111320 * 110540 * math.cos(math.radians(g.centroid.y))
 
 
+LU_SHOW = re.compile(r'정비|촉진|지구단위|고도지구|경관지구|역사문화|문화재|개발제한|최고높이|층이하|도시계획시설|도로')  # 팝업에 보일 토지이용계획
 KEEP = {'nb', 'ol', 'oh', 'no', 'nn', 'pub'}  # 0이어도 남길 속성 (지도 색칠에 씀)
 
 
@@ -28,6 +29,8 @@ def build_dong(sgg, p10, parcels):
     zs = [(shape(f['geometry']), f['properties'].get('uname', '')) for f in rd(sgg, f'{p10}_zones.json') or []]
     tree = STRtree([g for g, _ in zs])
     own = rd(sgg, f'{p10}_owners.json') or {}  # {pnu: 집계}
+    lu = rd(sgg, f'{p10}_landuse.json') or {}  # 토지이용계획 {pnu: [[코드, 저촉여부]]}
+    lun = {c: n for c, n in lu.get('_c', {}).items() if LU_SHOW.search(n or '')}
     bld = defaultdict(list)
     for b in rd(sgg, f'{p10}_bldgs.json') or []: bld[pnu_of(b)].append(b)
 
@@ -39,7 +42,8 @@ def build_dong(sgg, p10, parcels):
         z = next((zs[i][1] for i in tree.query(pt, predicate='within')), '') if zs else ''
         jb = f['properties'].get('jibun', '')
         o = own.get(pnu) or dict(ol=None, oh=None, pub=0, ar=round(m2(g), 1), jm=re.sub(r'^[\d\-\s산]+', '', jb), gj=0, cg='')
-        p = dict(p=pnu, j=jb, z=z, **o, **agg_bldgs(bld.get(pnu, [])), cx=round(pt.x, 6), cy=round(pt.y, 6))
+        p = dict(p=pnu, j=jb, z=z, **o, **agg_bldgs(bld.get(pnu, [])), cx=round(pt.x, 6), cy=round(pt.y, 6),
+                 lu='·'.join(dict.fromkeys(lun[c] + ('(저촉)' if a == '2' else '') for c, a in lu.get(pnu, []) if c in lun)))
         if p['ol'] is None: p['ol'] = p['oh'] = 0 if p['pub'] else max(p['ho'], 1); p['oe'] = 1  # 소유정보 없음 → 호수 또는 1인
         if p['ar'] and p['va']: p['fr'] = round(p['va'] / p['ar'] * 100)  # 현재 용적률(%)
         feats.append(dict(type='Feature', geometry=snap(g), properties={k: v for k, v in p.items() if v not in (None, '', 0) or k in KEEP}))

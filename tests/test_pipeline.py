@@ -43,14 +43,18 @@ def test_end_to_end(tmp_path, monkeypatch):
                                    for i in (1, 2, 3)],
               'LT_C_UQ111': [F(sq(127, 37.5, 0.01), uname='제2종일반주거지역')]}
     monkeypatch.setattr(fetch, 'vw', lambda layer, **k: layers[layer])
-    monkeypatch.setattr(fetch, 'ned', lambda p: [dict(pnu='9999910100100010000', cnrsPsnSn='1', cnrsPsnCo='2', posesnSeCodeNm='개인',
-                                                      lndpclAr='70', lndcgrCodeNm='대'),
-                                                 dict(pnu='9999910100100010000', cnrsPsnSn='2', posesnSeCodeNm='개인')])
+    LU = [dict(pnu='9999910100100010000', prposAreaDstrcCode='UQA122', prposAreaDstrcCodeNm='제2종일반주거지역', cnflcAt='1'),
+          dict(pnu='9999910100100010000', prposAreaDstrcCode='UBA100', prposAreaDstrcCodeNm='정비구역', cnflcAt='1')]
+    monkeypatch.setattr(fetch, 'ned', lambda p, url=fetch.NED: LU if url == fetch.LU else [
+        dict(pnu='9999910100100010000', cnrsPsnSn='1', cnrsPsnCo='2', posesnSeCodeNm='개인', lndpclAr='70', lndcgrCodeNm='대'),
+        dict(pnu='9999910100100010000', cnrsPsnSn='2', posesnSeCodeNm='개인')])
     monkeypatch.setattr(fetch, 'bh', lambda s, b: [B('0001', '19800101'), B('0002', '20250101', hoCnt='6', regstrGbCdNm='집합')])
 
     fetch.main('99999', 'vworld')
-    assert sorted(p.name for p in (seed / '99999').iterdir()) == ['9999910100_owners.json.gz', '9999910100_parcels.json.gz',
-                                                                  '9999910100_zones.json.gz', 'dongs.json.gz']
+    assert sorted(p.name for p in (seed / '99999').iterdir()) == ['9999910100_landuse.json.gz', '9999910100_owners.json.gz',
+                                                                  '9999910100_parcels.json.gz', '9999910100_zones.json.gz', 'dongs.json.gz']
+    lu = common.rd('99999', '9999910100_landuse.json')
+    assert lu['9999910100100010000'] == [['UQA122', '1'], ['UBA100', '1']] and lu['_c']['UBA100'] == '정비구역'
     assert not raw.exists()
     own = common.rd('99999', '9999910100_owners.json')
     assert list(own) == ['_v', '9999910100100010000'] and own['9999910100100010000']['oh'] == 2   # 원본 행 아닌 필지별 집계
@@ -122,3 +126,27 @@ def test_redev_addr():
     assert parse_addr('쌍문2동 81번지', G) == (None, '쌍문동', 81, 0)
     assert parse_addr('중구 충무로1가 24-1', G) == ('중구', '충무로1가', 24, 1)
     assert parse_addr('서초구 방배동 산108-1', G)[2] is None
+
+
+def test_zone_polys(tmp_path, monkeypatch):
+    """토지이용계획 정비구역 필지 → 경계, 정비사업 점과 매칭. 붙은 덩어리에 점이 둘이면 가까운 점으로 나눔"""
+    import gzip
+    from pipeline import redev
+    seed = tmp_path / 'seed'; monkeypatch.setattr(common, 'SEED', seed); monkeypatch.setattr(common, 'RAW', tmp_path / 'raw')
+    d = seed / '99999'; d.mkdir(parents=True)
+    w = lambda n, x: (d / n).write_bytes(gzip.compress(json.dumps(x).encode()))
+    w('dongs.json.gz', [dict(type='Feature', geometry=sq(127, 37.5, 0.01), properties=dict(emd_cd='99999101'))])
+    pn = lambda i: f'99999101001{i:04d}0000'
+    w('9999910100_parcels.json.gz', [dict(type='Feature', geometry=sq(127.001 + i * 0.0003, 37.501), properties=dict(pnu=pn(i))) for i in range(6)])
+    w('9999910100_landuse.json.gz', {'_v': 1, '_c': {'A': '정비구역', 'B': '제2종일반주거지역'},
+                                     **{pn(i): [['B', '1'], ['A', '1']] for i in range(4)}, pn(4): [['B', '1']]})
+    P = lambda x: dict(type='Feature', geometry=dict(type='Point', coordinates=[x, 37.50115]), properties=dict(n=f'z{x}', s='추진위', si=1, loc='정확'))
+    feats = [P(127.00115), P(127.00205), P(127.1)]
+    polys, rep = redev.zone_polys(feats, redev.Locator())
+    assert sorted(rep) == [0, 1] and len(polys) == 2                      # 4필지 덩어리 하나 → 두 구역으로 나뉨, 먼 점은 매칭 안 됨
+    assert round(sum(shape_area(p) for p in polys) / (0.0003 ** 2)) == 4
+
+
+def shape_area(f):
+    from shapely.geometry import shape
+    return shape(f['geometry']).area

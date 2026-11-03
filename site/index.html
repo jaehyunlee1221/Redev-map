@@ -170,6 +170,12 @@ map.on('style.load', async () => {
     map.addLayer({ id: 'r-line', type: 'line', source: 'redev', paint: { 'line-color': '#7c3aed', 'line-width': 2, 'line-dasharray': [3, 2] } });
     ['r-fill', 'r-line'].forEach(l => map.setLayoutProperty(l, 'visibility', 'none'));
   } catch (e) { $('rz').parentElement.style.display = 'none'; }
+  try {  // 정비구역 경계 (토지이용계획상 정비구역·재정비촉진구역 필지를 묶은 것)
+    map.addSource('zpoly', { type: 'geojson', data: await (await fetch(D('zonepoly.geojson'))).json() });
+    const zc = ['match', ['get', 'si'], ...SCOL.flatMap((c, i) => [i, c]), '#6b7280'];
+    map.addLayer({ id: 'zp-fill', type: 'fill', source: 'zpoly', paint: { 'fill-color': zc, 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0.35, 15, 0.12] } });
+    map.addLayer({ id: 'zp-line', type: 'line', source: 'zpoly', paint: { 'line-color': zc, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.2, 16, 3] } });
+  } catch (e) {}
   try {  // 정비사업 구역 (대표 지번 위치)
     Z = (await (await fetch(D('zones.geojson'))).json()).features;
     map.addSource('zones', { type: 'geojson', data: fc(Z) });
@@ -191,7 +197,7 @@ map.on('style.load', async () => {
 });
 
 $('mode').onchange = e => setMode(e.target.value);
-$('zn').onchange = e => ['z-pt', 'z-lb'].forEach(l => map.getLayer(l) && map.setLayoutProperty(l, 'visibility', e.target.checked ? 'visible' : 'none'));
+$('zn').onchange = e => ['z-pt', 'z-lb', 'zp-fill', 'zp-line'].forEach(l => map.getLayer(l) && map.setLayoutProperty(l, 'visibility', e.target.checked ? 'visible' : 'none'));
 $('rz').onchange = e => ['r-fill', 'r-line'].forEach(l => map.getLayer(l) && map.setLayoutProperty(l, 'visibility', e.target.checked ? 'visible' : 'none'));
 const zoneInfo = pt => map.getLayer('r-fill') ? map.queryRenderedFeatures(pt, { layers: ['r-fill'] }).map(f => f.properties)
   .map(z => `<br><span style="color:#7c3aed">■ 건축규제 구역 ${({UDX100: '건축허가 제한', UDX200: '건축선·높이 등', UDX999: '기타'})[z.cd] || z.cd}${z.nm ? ' · ' + z.nm : ''}${z.dt ? ' · 고시 ' + z.dt.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : ''}</span>`).join('') : '';
@@ -201,6 +207,8 @@ map.on('click', e => {
   if (drawing) { pts.push([e.lngLat.lng, e.lngLat.lat]); renderDraw(); return; }
   const z = map.getLayer('z-pt') && map.queryRenderedFeatures(e.point, { layers: ['z-pt'] })[0];
   if (z) return zonePopup(z);
+  const zp = map.getLayer('zp-fill') && map.queryRenderedFeatures(e.point, { layers: ['zp-fill'] })[0]?.properties;
+  if (zp && map.getZoom() < 15) return zp.zi != null ? zonePopup(Z[zp.zi], e.lngLat) : new maplibregl.Popup().setLngLat(e.lngLat).setHTML('<b>정비구역</b><br>사업 정보 없음 (토지이용계획상 정비구역)').addTo(map);
   const p0 = map.queryRenderedFeatures(e.point, { layers: ['p-fill'] })[0]?.properties;
   const p = p0 && { nb: 0, no: 0, nu: 0, hh: 0, ho: 0, gj: 0, ar: 0, jm: '', ...p0 };
   const d = map.queryRenderedFeatures(e.point, { layers: ['d-fill'] })[0]?.properties;
@@ -208,6 +216,8 @@ map.on('click', e => {
       건물 ${p.nb}동 (노후 ${p.no}, 미상 ${p.nu})${p.y0 ? ` · 준공 ${p.y0}${p.y1 !== p.y0 ? '–' + p.y1 : ''}` : ''}<br>
       세대·가구 ${fmt(p.hh)} · 집합 호수 ${fmt(p.ho)}<br>
       ${farLine(p)}
+      ${p.lu ? `<span style="color:#6b7280">${p.lu}</span><br>` : ''}
+      ${zp ? (zp.zi != null ? `<a href="#" onclick="zonePopup(Z[${zp.zi}]);return false" style="color:${scol(+zp.si)};font-weight:600">■ ${zp.n}${zp.s ? ' · ' + zp.s : ''} (자세히)</a><br>` : '<span style="color:#6b7280;font-weight:600">■ 정비구역 (사업 정보 없음)</span><br>') : ''}
       추정 소유자 ${p.dp ? `같은 단지 → ${+p.dp.slice(11, 15)}${+p.dp.slice(15) ? '-' + +p.dp.slice(15) : ''}번지에 합산` : p.pub ? '국공유' : p.ol === p.oh ? p.ol + '명' : `${p.ol}~${p.oh}명`}${p.oe ? ' <span style="color:#9ca3af">(대체값)</span>' : ''}
       ${p.cg ? `<br>최근 소유권변동 ${p.cg}` : ''}`
     + zoneInfo(e.point)
@@ -223,18 +233,19 @@ function farLine(p) {
 }
 
 // ---------- 정비사업 ----------
-function zonePopup(f) {
+function zonePopup(f, at) {
   const z = f.properties, si = +z.si;
   const hh = z.bh ? `기존 ${fmt(z.eh)}세대 → <b>계획 ${fmt(z.bh)}세대</b>${z.sh || z.rh ? ` (분양 ${fmt(z.sh)} · 임대 ${fmt(z.rh)})` : ''}` : z.eh ? `기존 ${fmt(z.eh)}세대` : '';
   const ds = DLAB.filter(([k]) => z[k]).map(([k, l]) => `<tr><td>${l}</td><td style="text-align:right">${z[k]}</td></tr>`).join('');
-  new maplibregl.Popup({ maxWidth: '300px' }).setLngLat(f.geometry.coordinates).setHTML(
+  document.querySelectorAll('.maplibregl-popup').forEach(x => x.remove());
+  new maplibregl.Popup({ maxWidth: '300px' }).setLngLat(at || f.geometry.coordinates).setHTML(
     `<b style="font-size:14px">${z.n}</b><br><span style="color:#6b7280">${[z.gu, z.t, z.pp, z.gp].filter(Boolean).join(' · ')}</span>
      <div style="margin-top:6px">현재 단계 <b style="color:${scol(si)}">${z.s || '미상'}</b></div>
      <div class="steps">${STAGES.slice(0, 8).map((s, i) => `<span style="background:${i <= si ? scol(si) : ''}" title="${s}"></span>`).join('')}</div>
      <div class="stepn"><span>구역지정</span><span>조합</span><span>사업시행</span><span>관리처분</span><span>착공</span></div>
      ${hh ? `<div style="margin-top:6px">${hh}</div>` : ''}
      ${ds ? `<table style="width:100%;margin-top:6px;font-size:12px">${ds}</table>` : ''}
-     <div style="color:#9ca3af;font-size:11px;margin-top:4px">${z.a || ''}${z.loc === '근처' ? ' (근처 지번에 표시)' : ''}</div>`).addTo(map);
+     <div style="color:#9ca3af;font-size:11px;margin-top:4px">${z.a || ''}${z.loc === '근처' ? ' (근처 지번에 표시 · 경계 미확인)' : ''}</div>`).addTo(map);
 }
 function zoneList() {
   const f = $('zf')?.value ?? '';
