@@ -40,6 +40,16 @@ def fetch_all(s):
     print(f'DUMP {s} ' + base64.b64encode(gzip.compress(json.dumps(rows, ensure_ascii=False).encode())).decode(), flush=True)
 
 
+if len(sys.argv) > 1 and sys.argv[1] == 'only':  # 서비스명을 알 때: 그것만 조회·덤프
+    for s in sys.argv[2:]:
+        x, err = call(s, 1, 1)
+        if not x: print(s, '실패', err, flush=True); continue
+        n = int(x.get('list_total_count') or 0)
+        if n <= 30000: fetch_all(s)
+        else:
+            y, err = call(s, 1, 1000); show(s, x, (y or {}).get('row') or [])
+    sys.exit()
+
 print('== 1) 카탈로그', flush=True)
 cat = {}
 for t in TITLES:
