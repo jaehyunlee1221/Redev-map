@@ -61,6 +61,11 @@ jobs:
         env:
           SEOUL_API_KEY: ${{ secrets.SEOUL_API_KEY }}
           DUMP: '1'
+      - name: released                      # 해제 구역 (서울시 정비구역 결정고시 이력) + 서울 도시계획 데이터 원본
+        if: always()
+        continue-on-error: true
+        run: python -m pipeline.released 2>&1 | tee released.log; exit ${PIPESTATUS[0]}
+        env: { SEOUL_API_KEY: '${{ secrets.SEOUL_API_KEY }}' }
       - name: features                      # 성공가능성 모델용 구역 변수 (기준연도 시점 노후도 등)
         if: always()
         continue-on-error: true
@@ -86,7 +91,7 @@ jobs:
         run: |
           python - <<'EOF'
           import pathlib
-          for n in ('fetch', 'market', 'build', 'redev', 'features'):
+          for n in ('fetch', 'market', 'build', 'redev', 'released', 'features'):
               p = pathlib.Path(f'{n}.log')
               if p.exists():
                   t = p.read_text(errors='replace')[-3000:].replace('%', '%25').replace('\r', '').replace('\n', '%0A')

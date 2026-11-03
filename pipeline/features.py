@@ -128,13 +128,13 @@ def main():
         a = g.area * m_per_deg(g.centroid.y)[0] * m_per_deg(g.centroid.y)[1]  # 해제구역과 같은 방식(원)으로도 계산 → 비교용
         f = features(P, circle(g.centroid.x, g.centroid.y, a), ref)
         if f: rows.append(dict(kind='active_c', id=i, name=pr.get('n'), ref=ref, **meta, **f))
-    rel = RAW / 'released.json'  # 해제구역 (사용자 제공 목록 → pipeline.released가 위치 매칭)
+    rel = RAW / 'released.json'  # 해제구역 (pipeline.released: 서울시 정비구역 결정고시 이력의 폐지·실효)
     if rel.exists():
         for r in json.loads(rel.read_text(encoding='utf-8')):
             if not r.get('x'): continue
             ref = int(str(r.get('ref') or r.get('rd') or '2012')[:4])
-            f = features(P, circle(r['x'], r['y'], r.get('area') or 30000), min(max(ref, 2006), 2026))
-            if f: rows.append(dict(kind='released', name=r.get('n'), ref=ref, rd=r.get('rd'), **f))
+            f = features(P, circle(r['x'], r['y'], r.get('area') or 30000), min(max(ref, 2006), 2026))  # 위치=대표 지번 → 같은 면적의 원 (근사)
+            if f: rows.append(dict(kind='released', name=r.get('n'), ref=ref, rd=r.get('rd'), zd=r.get('zd'), t=r.get('kind'), **f))
     out = RAW / 'zone_features.json'
     out.write_text(json.dumps(rows, ensure_ascii=False), encoding='utf-8')
     print(f'구역 변수 {len(rows)}개 (진행 {sum(r["kind"] == "active" for r in rows)} · 해제 {sum(r["kind"] == "released" for r in rows)})', flush=True)

@@ -61,6 +61,10 @@ class Locator:
         for f in fs:
             w = f['properties']['n'].split()
             if len(w) >= 3: self.dong[(w[-2], w[-1])] = f['properties']['c']
+        for sgg in regions('seeded'):  # 빌드 결과가 없어도 seed의 동 이름으로
+            for d in rd(sgg, 'dongs.json') or []:
+                w = (d['properties'].get('full_nm') or '').split()
+                if len(w) >= 3: self.dong.setdefault((w[-2], w[-1]), d['properties']['emd_cd'] + '00')
         self.gus = sorted({g for g, _ in self.dong}, key=len, reverse=True)
         self.cache = {}
 
@@ -69,17 +73,33 @@ class Locator:
             self.cache[p10] = {f['properties']['pnu']: f for f in rd(p10[:5], f'{p10}_parcels.json') or []}
         return self.cache[p10]
 
-    def find(self, district, addr):
-        gu, dong, bun, ji = parse_addr(addr, self.gus)
+    def split(self, district, addr):
+        """주소 → (구, p10, 산여부, 본번, 부번). 동 이름은 그 구의 실제 법정동 목록에서 가장 긴 것으로 (행정동 번호·'성수1가1동' 형태 보정)"""
+        s = re.sub(r'\s+', '', addr or '')
+        s = re.sub(r'^(서울특별시|서울시|서울|경기도|성남시)+', '', s)
+        gu = next((g for g in self.gus if s.startswith(g)), None)
+        if gu: s = s[len(gu):]
         gu = gu or district
-        p10 = self.dong.get((gu, dong))
+        names = [d for g, d in self.dong if g == gu] if gu else [d for _, d in self.dong]
+        heads = [s, re.sub(r'^([가-힣]+?)(\d+)가[\d,·.]*동', r'\1동\2가', s), re.sub(r'^([가-힣]+?)[\d,·.]+동', r'\1동', s)]
+        for h in heads:
+            nm = max((n for n in names if h.startswith(n)), key=len, default=None)
+            if nm:
+                if not gu: gu = next(g for g, d in self.dong if d == nm)
+                m = re.match(r'(?:번지)?(산)?(\d+)(?:-(\d+))?', h[len(nm):])
+                return gu, self.dong.get((gu, nm)), bool(m and m.group(1)), int(m.group(2)) if m else None, int(m.group(3) or 0) if m else 0
+        return gu, None, False, None, 0
+
+    def find(self, district, addr):
+        gu, p10, san, bun, ji = self.split(district, addr)
         if not p10 or bun is None: return None, None
         ps = self.parcels(p10)
-        pnu = f'{p10}1{bun:04d}{ji:04d}'
+        t = '2' if san else '1'
+        pnu = f'{p10}{t}{bun:04d}{ji:04d}'
         if pnu in ps: hit, how = ps[pnu], '정확'
         else:  # 같은 본번 → 가장 가까운 본번
-            same = [k for k in ps if k[10] == '1' and int(k[11:15]) == bun]
-            near = same or sorted((k for k in ps if k[10] == '1'), key=lambda k: abs(int(k[11:15]) - bun))[:1]
+            same = [k for k in ps if k[10] == t and int(k[11:15]) == bun]
+            near = same or sorted((k for k in ps if k[10] == t), key=lambda k: abs(int(k[11:15]) - bun))[:1]
             if not near: return None, None
             hit, how = ps[min(near)], '근처'
         pt = shape(hit['geometry']).representative_point()

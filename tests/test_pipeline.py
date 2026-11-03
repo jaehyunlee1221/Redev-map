@@ -150,3 +150,31 @@ def test_zone_polys(tmp_path, monkeypatch):
 def shape_area(f):
     from shapely.geometry import shape
     return shape(f['geometry']).area
+
+
+def test_released():
+    from pipeline.released import released, norm
+    assert norm('신길6재정비촉진구역 주택재개발') == '신길6' == norm('신길제6구역')
+
+    class L:
+        gus = ['영등포구']
+        def find(self, gu, a): return ([126.9, 37.5], '정확') if gu == '영등포구' else (None, None)
+    row = lambda c, t, n, a='영등포구 신길동 510', s='주택재개발사업구역': dict(RPT_MNG_CD=c, RPT_TYPE=t, RGN_NM=n, PSTN_NM=a, LOGVM='서울특별시',
+                                                                           SCLSF=s, AREA_EXS='36266', AREA_CHG='')
+    rows = [row('11000AGZ200811270001', '신설', '신길6재정비촉진구역'), row('11000AGZ201710160001', '폐지', '신길6재정비촉진구역'),
+            row('11000AGZ201710200001', '폐지', '신길6 재정비촉진구역'),  # 같은 해 중복
+            row('11000AGZ201501010001', '폐지', '창신숭인', '종로구 창신동', '주거지형재정비촉진지구'),  # 지구 전체 → 제외
+            row('11000AGZ198204260001', '폐지', '옛구역')]  # 2010년 이전 → 제외
+    out = released(rows, L())
+    assert len(out) == 1 and out[0]['zd'] == '2008-11-27' and out[0]['rd'] == '2017-10-16' and out[0]['ref'] == 2008
+    assert out[0]['x'] == 126.9 and out[0]['area'] == 36266 and out[0]['kind'] == '촉진'
+
+
+def test_locator_split():
+    from pipeline.redev import Locator
+    L = Locator.__new__(Locator)
+    L.dong = {('성동구', '성수동1가'): '1120011400', ('서대문구', '북가좌동'): '1141012000', ('동작구', '상도동'): '1159010200'}
+    L.gus = ['서대문구', '성동구', '동작구']
+    assert L.split(None, '성동구 성수1가1동 72-10번지') == ('성동구', '1120011400', False, 72, 10)
+    assert L.split(None, '서대문구 북가좌동 340-30번지 일대') == ('서대문구', '1141012000', False, 340, 30)
+    assert L.split('동작구', '상도4동 산 65번지 일대') == ('동작구', '1159010200', True, 65, 0)
