@@ -112,6 +112,12 @@ def circle(x, y, area_m2):  # 면적이 같은 원 (위경도 비율 보정)
     return scale(Point(x, y).buffer(r / kx, 32), 1, kx / ky, origin=(x, y))
 
 
+def ty(s):
+    """사업 유형을 출처와 상관없이 같은 기준으로: 도시정비형(도시환경) / 주택정비형(주택재개발) / 재건축"""
+    s = s or ''
+    return '재건축' if '재건축' in s else '도시정비형' if re.search('도시정비|도시환경', s) else '주택정비형'
+
+
 def zone_areas():
     """구역 이름(정규화) → 면적㎡: 서울플랜+ 정비사업 현황, 없으면 정비구역 결정고시 이력의 마지막 변경 후 면적"""
     out = {}
@@ -120,7 +126,7 @@ def zone_areas():
         v = str(r.get('AREA_CHG_AFTR') or '')
         if r['RPT_TYPE'] not in ('폐지', '실효') and re.fullmatch(r'[\d.]+', v) and float(v) > 500: out[norm(r['RGN_NM'])] = float(v)
     for r in up('vnBsnsNmtn'):
-        if (r.get('AREA') or 0) > 500: out[norm(r.get('BSNS_NAME'))] = float(r['AREA'])
+        if (r.get('BSNS_AREA') or 0) > 500: out[norm(r.get('BSNS_NAME'))] = float(r['BSNS_AREA'])  # AREA는 연면적 → 구역면적은 BSNS_AREA
     out.pop('', None)
     return out
 
@@ -141,7 +147,7 @@ def main():
         g = polys.get(i)
         if g is not None:
             f = features(P, g, ref)
-            if f: rows.append(dict(kind='active', id=i, name=pr.get('n'), ref=ref, **meta, **f))
+            if f: rows.append(dict(kind='active', id=i, name=pr.get('n'), ref=ref, ty=ty(pr.get('t')), **meta, **f))
             a, src = g.area * m_per_deg(g.centroid.y)[0] * m_per_deg(g.centroid.y)[1], '경계'
             x, y = g.centroid.x, g.centroid.y
         else:  # 경계가 아직 없으면(토지이용계획 미수집) 서울시 고시 면적으로 원
@@ -149,20 +155,20 @@ def main():
             x, y = z['geometry']['coordinates']
             if not a: continue
         f = features(P, circle(x, y, a), ref)  # 해제구역과 같은 방식(원) → 비교용
-        if f: rows.append(dict(kind='active_c', id=i, name=pr.get('n'), ref=ref, area_src=src, **meta, **f))
+        if f: rows.append(dict(kind='active_c', id=i, name=pr.get('n'), ref=ref, area_src=src, ty=ty(pr.get('t')), **meta, **f))
     rel = RAW / 'released.json'  # 해제구역 (pipeline.released: 서울시 정비구역 결정고시 이력의 폐지·실효)
     if rel.exists():
         for r in json.loads(rel.read_text(encoding='utf-8')):
             if not r.get('x'): continue
             ref = int(str(r.get('ref') or r.get('rd') or '2012')[:4])
             f = features(P, circle(r['x'], r['y'], r.get('area') or 30000), min(max(ref, 2006), 2026))  # 위치=대표 지번 → 같은 면적의 원 (근사)
-            if f: rows.append(dict(kind='released', name=r.get('n'), ref=ref, rd=r.get('rd'), zd=r.get('zd'), t=r.get('kind'), **f))
+            if f: rows.append(dict(kind='released', name=r.get('n'), ref=ref, rd=r.get('rd'), zd=r.get('zd'), t=r.get('kind'), ty=ty(r.get('t')), **f))
     done = RAW / 'completed.json'  # 완료 추정 구역 (해제 이력 없이 진행 목록에서 빠진 곳) → 성공 사례 후보
     if done.exists():
         for r in json.loads(done.read_text(encoding='utf-8')):
             if not r.get('x'): continue
             f = features(P, circle(r['x'], r['y'], r.get('area') or 30000), min(max(r['ref'], 2006), 2026))
-            if f: rows.append(dict(kind='done', name=r.get('n'), ref=r['ref'], zd=r.get('zd'), dd=r.get('dd'), t=r.get('kind'), **f))
+            if f: rows.append(dict(kind='done', name=r.get('n'), ref=r['ref'], zd=r.get('zd'), dd=r.get('dd'), t=r.get('kind'), ty=ty(r.get('t')), **f))
     out = RAW / 'zone_features.json'
     out.write_text(json.dumps(rows, ensure_ascii=False), encoding='utf-8')
     print(f'구역 변수 {len(rows)}개 (진행 {sum(r["kind"] == "active" for r in rows)} · 진행-원 {sum(r["kind"] == "active_c" for r in rows)} · 해제 {sum(r["kind"] == "released" for r in rows)} · 완료추정 {sum(r["kind"] == "done" for r in rows)})', flush=True)

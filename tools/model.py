@@ -18,8 +18,8 @@ from sklearn.metrics import roc_auc_score
 
 FULL = ['old_ratio', 'age_mean', 'bldg_per_ha', 'hh_per_ha', 'owners_per_ha', 'jiphap_ratio', 'new5_before_ref', 'small_ratio', 'dae_ratio',
         'road_ratio', 'pub_ratio', 'far_room', 'far_now', 'z1', 'z2', 'z3', 'zcom', 'lu_plan', 'lu_heritage', 'log_area', 'log_gj',
-        'station_m', 'cityhall_km', 'gangnam_km', 'yeouido_km', 'apt_gu', 'price_gap', 'k_rebuild', 'k_promo']
-FIXED = ['log_area', 'station_m', 'cityhall_km', 'gangnam_km', 'yeouido_km', 'apt_gu', 'apt_gu_new', 'k_rebuild', 'k_promo', 'seoul_ne', 'seoul_sw']
+        'station_m', 'cityhall_km', 'gangnam_km', 'yeouido_km', 'apt_gu', 'price_gap', 'k_rebuild', 'k_dosi']
+FIXED = ['log_area', 'station_m', 'cityhall_km', 'gangnam_km', 'yeouido_km', 'apt_gu', 'apt_gu_new', 'k_rebuild', 'k_dosi', 'seoul_ne', 'seoul_sw']
 STAGE = {'구역지정': 0, '추진위': 1, '조합설립': 2, '건축심의': 3, '사업시행': 4, '관리처분': 5, '이주': 6, '착공': 7, '준공': 8}
 
 
@@ -33,9 +33,9 @@ def load(path):
     d['log_area'] = np.log(d['area_ha'].clip(lower=0.1))
     d['log_gj'] = np.log(d['gj_med'].where(d['gj_med'] > 0))
     d['si'] = d['s'].map(STAGE) if 's' in d else np.nan
-    tt = d['t'].astype(str)
-    d['k_rebuild'] = tt.str.contains('재건축').astype(int)
-    d['k_promo'] = tt.str.contains('촉진').astype(int)
+    tt = d['ty'].astype(str) if 'ty' in d else d['t'].astype(str)  # features.ty: 출처와 무관하게 같은 기준의 유형
+    d['k_rebuild'] = (tt == '재건축').astype(int)
+    d['k_dosi'] = (tt == '도시정비형').astype(int)
     d['seoul_ne'] = ((d.cx > 127.0) & (d.cy > 37.57)).astype(int)   # 동북권 대략
     d['seoul_sw'] = ((d.cx < 126.95) & (d.cy < 37.53)).astype(int)  # 서남권 대략
     return d
