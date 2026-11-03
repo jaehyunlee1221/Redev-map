@@ -24,7 +24,11 @@ def months(start=(2006, 1)):
 def rtms(sgg, ym):
     out, page = [], 1
     while True:
-        r = requests.get(RT, params=dict(serviceKey=DK, LAWD_CD=sgg, DEAL_YMD=ym, numOfRows=1000, pageNo=page), timeout=60)
+        for i in range(3):  # 서버가 가끔 응답이 늦음 → 재시도
+            try: r = requests.get(RT, params=dict(serviceKey=DK, LAWD_CD=sgg, DEAL_YMD=ym, numOfRows=1000, pageNo=page), timeout=40); break
+            except requests.RequestException:
+                if i == 2: raise
+                time.sleep(5 * (i + 1))
         try: x = ET.fromstring(r.content)
         except ET.ParseError: raise RuntimeError(f'XML 아님 (HTTP {r.status_code}): {r.text[:200]}')
         code = x.findtext('.//resultCode') or x.findtext('.//returnReasonCode')
@@ -46,10 +50,10 @@ def fetch_rtms(cap):
             if p.exists() and ym not in recent: continue
             if n >= cap: return print(f'실거래: 이번 실행 한도 {cap}회 도달 → 다음 실행에 이어받음', flush=True)
             n += 1
-            try: rows = rtms(sgg, ym)
+            try: rows = rtms(sgg, ym); err = 0
             except Exception as e:
-                err += 1; print(f'실거래 실패 {sgg} {ym}: {e}', flush=True)
-                if err >= 5 or any(k in str(e) for k in ('LIMIT', 'SERVICE_KEY', 'ACCESS_DENIED', '등록되지')): return print(f'실거래 중단: {e}', flush=True)
+                err += 1; print(f'실거래 실패 {sgg} {ym}: {e}', flush=True)  # 실패한 달은 다음 실행 때 다시
+                if err >= 8 or any(k in str(e) for k in ('LIMIT', 'SERVICE_KEY', 'ACCESS_DENIED', '등록되지')): return print(f'실거래 중단: {e}', flush=True)
                 continue
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(json.dumps(rows, ensure_ascii=False), encoding='utf-8')
