@@ -119,10 +119,10 @@ def zone(r, loc):
     return dict(type='Feature', geometry=dict(type='Point', coordinates=xy), properties={k: v for k, v in p.items() if v not in (None, '')})
 
 
-ZRE = re.compile(r'정비구역|촉진구역')  # 토지이용계획에서 정비구역(도시정비법)·재정비촉진구역(뉴타운)
+ZRE = re.compile(r'^(정비구역|정비구역기타|정비구역미분류|재정비촉진구역)$')  # 토지이용계획 '정비구역'(도시정비법). 시장·환경정비구역, 정비예정구역은 제외
 
 
-def zone_polys(feats, loc):
+def zone_polys(feats, loc, areas=None):
     """토지이용계획상 정비구역 필지 → 붙어 있는 것끼리 묶어 구역 경계. 정비사업 점과 매칭(같은 덩어리에 여러 구역이면 가까운 점으로 나눔)
     → (경계 features, 매칭된 점 index별 경계 대표점)"""
     ps = []
@@ -134,7 +134,7 @@ def zone_polys(feats, loc):
             codes = {c for c, n in lu.get('_c', {}).items() if ZRE.search(n or '')}
             if not codes: continue
             par = loc.parcels(p10)
-            ps += [shape(par[k]['geometry']) for k, v in lu.items() if not k.startswith('_') and k in par and any(c in codes for c, _ in v)]
+            ps += [shape(par[k]['geometry']) for k, v in lu.items() if not k.startswith('_') and k in par and any(c in codes and a != '3' for c, a in v)]  # 3=접합(경계에 닿기만) 제외
     if not ps: return [], {}
     blobs = unary_union([g.buffer(3e-5) for g in ps])  # 도로 하나 정도 떨어진 건 같은 덩어리 (~3m)
     blobs = list(getattr(blobs, 'geoms', [blobs]))
@@ -155,6 +155,14 @@ def zone_polys(feats, loc):
         u = set_precision(unary_union([g.buffer(2e-6) for g in gs]).buffer(-2e-6).simplify(2e-6), 1e-6)
         if u.is_empty: continue
         pr = {x: feats[k]['properties'][x] for x in ('n', 's', 'si', 'gu', 't') if x in feats[k]['properties']} if isinstance(k, int) else dict(n='정비구역', si=-1)
+        if isinstance(k, int) and areas:  # 큰 정비구역 덩어리(도심 도시정비형 등)를 가까운 점으로만 나누면 고시 면적보다 훨씬 커짐 → 고시 면적 1.5배 원으로 잘라냄
+            from .released import norm
+            from .features import circle, m_per_deg
+            a = areas.get(norm(feats[k]['properties'].get('n')))
+            kx, ky = m_per_deg(u.centroid.y)
+            if a and u.area * kx * ky > 2 * a:
+                v = u.intersection(circle(*feats[k]['geometry']['coordinates'], a * 1.5))
+                if not v.is_empty and v.area > 0: u = set_precision(v, 1e-6); pr['cut'] = 1
         if isinstance(k, int): pr['zi'] = k; rep[k] = u
         out.append(dict(type='Feature', geometry=mapping(u), properties=pr))
     return out, rep
@@ -181,7 +189,10 @@ def main():
     loc = Locator()
     feats = [z for z in (zone(r, loc) for r in rows) if z]
     OUT.mkdir(parents=True, exist_ok=True)
-    polys, rep = zone_polys(feats, loc)
+    from .released import fetch
+    from .features import zone_areas
+    for sv in ('upisRebuild', 'upisNewtown', 'vnBsnsNmtn'): fetch(sv)  # 구역 고시 면적 (경계 보정용)
+    polys, rep = zone_polys(feats, loc, zone_areas())
     for k, u in rep.items():  # 점이 경계 밖이면(주소가 '근처'였던 것) 경계 안으로 옮김
         if not u.buffer(1e-5).contains(Point(feats[k]['geometry']['coordinates'])):
             pt = u.representative_point()
