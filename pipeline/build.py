@@ -25,7 +25,7 @@ LU_SHOW = re.compile(r'정비|촉진|지구단위|고도지구|경관지구|역�
 KEEP = {'nb', 'ol', 'oh', 'no', 'nn', 'pub'}  # 0이어도 남길 속성 (지도 색칠에 씀)
 
 
-FARLOG = []
+FARLOG, APT = [], []
 
 
 def far(p):
@@ -36,8 +36,9 @@ def far(p):
     den = max(p.get('ar') or 0, pa or 0)
     old = round(p['va'] / p['ar'] * 100) if p.get('ar') else None
     fr = vr or (round(p['va'] / den * 100) if den else None)
-    if fr and fr > 1500: fr = None
+    if fr and fr > 1500 and not vr: fr = None  # 계산값만 상한 (대장에 적힌 용적률은 도심 고층이면 1,500% 넘기도 함)
     if fr: p['fr'] = fr
+    if p.get('ho', 0) >= 50: APT.append(fr)  # 공동주택 필지 확인용
     if old and old > 1500 and len(FARLOG) < 2000: FARLOG.append((p['p'], p.get('j'), old, fr, vr, pa, p.get('ar'), p.get('nb')))
 
 
@@ -98,6 +99,9 @@ def main(arg):
     if (SEED / 'redev.json.gz').exists():  # 건축규제 구역 오버레이 (UD210)
         dump(OUT / 'redev.geojson', rd('', 'redev.json'))
     dump(path, list(dongs.values()))
+    if APT:
+        v = sorted(x for x in APT if x)
+        print(f'공동주택(50호+) 필지 {len(APT)}개: 용적률 있음 {len(v)} · 중위 {v[len(v) // 2] if v else None}% · 90% {v[int(len(v) * .9)] if v else None}% · 최대 {v[-1] if v else None}%', flush=True)
     if FARLOG:  # 용적률 보정 확인용
         print(f'용적률 보정: 필지 면적 기준 1,500% 넘던 필지 {len(FARLOG)}개 → 대장 용적률 사용 {sum(1 for x in FARLOG if x[4])} · 대지면적으로 계산 '
               f'{sum(1 for x in FARLOG if x[3] and not x[4])} · 표시 안 함 {sum(1 for x in FARLOG if not x[3])}', flush=True)
