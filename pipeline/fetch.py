@@ -13,10 +13,12 @@ from .metrics import agg_owners, unit, LAND
 VW = 'https://api.vworld.kr/req/data'
 NED = 'https://api.vworld.kr/ned/data/getPossessionAttr'
 LU = 'https://api.vworld.kr/ned/data/getLandUseAttr'  # 토지이용계획 (필지별 용도지역·지구·구역: 정비구역 여부 등)
+LP = 'https://api.vworld.kr/ned/data/getIndvdLandPriceAttr'  # 개별공시지가 (연도별) → 정비구역 지정 당시 땅값
+PRICE_YEARS = (2005, 2008, 2011, 2014, 2017)  # 지정 2003~2015 구역의 지정 당시 값을 쓰기 위한 연도 (가까운 해로 보간)
 BH = 'https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo'
 VK, DK, DOM = (os.environ.get(k, '') for k in ('VWORLD_KEY', 'DATA_GO_KR_KEY', 'VWORLD_DOMAIN'))
-DAYS = dict(dongs=90, parcels=90, zones=90, owners=30, landuse=60, bldgs=25)  # 이 기간 안에 받은 파일은 건너뜀
-VER = dict(owners=3, landuse=1)  # 집계 방식이 바뀌면 올림 → 예전 파일은 기한 내라도 다시 받음
+DAYS = dict(dongs=90, parcels=90, zones=90, owners=30, landuse=60, prices=365, bldgs=25)  # 이 기간 안에 받은 파일은 건너뜀
+VER = dict(owners=3, landuse=1, prices=1)  # 집계 방식이 바뀌면 올림 → 예전 파일은 기한 내라도 다시 받음
 ERR = []
 
 
@@ -57,10 +59,10 @@ def body(j):  # NED 응답의 본문 ({possessions|landUses|...: {field, totalCo
     return next((v for v in j.values() if isinstance(v, dict) and ('field' in v or 'totalCount' in v)), j)
 
 
-def ned(pnu, url=NED):  # 토지소유정보·토지이용계획 (PNU 앞자리로 조회)
+def ned(pnu, url=NED, **extra):  # 토지소유정보·토지이용계획·공시지가 (PNU 앞자리로 조회)
     out, page = [], 1
     while True:
-        j = body(get(url, key=VK, domain=DOM, pnu=pnu, format='json', numOfRows=1000, pageNo=page))
+        j = body(get(url, key=VK, domain=DOM, pnu=pnu, format='json', numOfRows=1000, pageNo=page, **extra))
         if 'field' not in j and 'totalCount' not in j: limit(j); raise RuntimeError(f'{url.rsplit("/", 1)[-1]} {pnu}: {str(j)[:300]}')
         rows = j.get('field') or []
         out += rows
@@ -117,6 +119,17 @@ def landuse(p10):
     return out
 
 
+def prices(p10):
+    """필지별 연도별 개별공시지가(원/㎡) → {_v, _y: [연도], pnu: [값...]} (없으면 0)"""
+    ys = list(PRICE_YEARS)
+    out = {'_v': VER['prices'], '_y': ys}
+    for i, y in enumerate(ys):
+        for r in ned(p10, LP, stdrYear=str(y)):
+            v = int(float(r.get('pblntfPclnd') or 0))
+            if r.get('pnu') and v: out.setdefault(r['pnu'], [0] * len(ys))[i] = v
+    return out
+
+
 def run(path, fn, days, ver=None):
     if path.exists() and time.time() - path.stat().st_mtime < days * 86400:
         if ver is None or rd(path.parent.name, path.name.removesuffix('.gz')).get('_v') == ver: return '-'
@@ -169,6 +182,8 @@ def check(sgg):
             body(get(NED, key=VK, domain=DOM, pnu=q, format='json', numOfRows=1, pageNo=1))))
     t(f'토지이용계획 pnu={pnu}', lambda: (lambda j: f"총 {j.get('totalCount')}건, 예시 {(j.get('field') or [])[:3]}")(
         body(get(LU, key=VK, domain=DOM, pnu=pnu, format='json', numOfRows=20, pageNo=1))))
+    t(f'개별공시지가 pnu={p10} 2008년', lambda: (lambda j: f"총 {j.get('totalCount')}건, 예시 {(j.get('field') or [{}])[0]}")(
+        body(get(LP, key=VK, domain=DOM, pnu=p10, stdrYear='2008', format='json', numOfRows=1, pageNo=1))))
     if DK: t('건축물대장', lambda: f"{len(bh(sgg, p10[5:]))}건")
 
 
@@ -202,7 +217,8 @@ def collect(arg, mode):
                                              if x['properties']['pnu'].startswith(p10)],
                             zones=lambda: [feat(x, 6, uname=x['properties'].get('uname', '')) for x in vw('LT_C_UQ111', geomFilter=box)],
                             owners=lambda: owners(p10),
-                            landuse=lambda: landuse(p10))
+                            landuse=lambda: landuse(p10),
+                            prices=lambda: prices(p10))
             else:
                 base, ext = RAW / sgg, '.json'
                 jobs = dict(bldgs=lambda: bh(sgg, emd[5:] + '00'))

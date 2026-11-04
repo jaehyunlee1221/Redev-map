@@ -32,8 +32,12 @@ class Parcels:
                 self.props.append(p); pts.append(Point(p['cx'], p['cy']))
         self.tree = STRtree(pts)
         self.bld = defaultdict(list)
+        self.gh, self.gy = {}, None  # 연도별 개별공시지가 (PC 수집 prices) → 지정 당시 땅값
         for sgg in regions('seeded'):
             for d in rd(sgg, 'dongs.json') or []:
+                pr = rd(sgg, f"{d['properties']['emd_cd']}00_prices.json")
+                if pr:
+                    self.gy = pr['_y']; self.gh.update({k: v for k, v in pr.items() if not k.startswith('_')})
                 for b in rd(sgg, f"{d['properties']['emd_cd']}00_bldgs.json") or []:
                     if str(b.get('mainAtchGbCd', '0')) == '0': self.bld[pnu_of(b)].append(b)
         st = RAW / 'stations.json'
@@ -76,7 +80,8 @@ def features(P, g, ref, sgg=None):
     far_allow = sum(FAR.get(z, 0) * a for z, a in zs.items()) / ar
     far_now = sum(num(b.get('vlRatEstmTotArea')) or num(b.get('totArea')) for b in pre) / ar * 100
     c = g.centroid
-    gj = [p['gj'] for p in ps if p.get('gj')]
+    gja = {p['p']: gj_at(P, p, ref) for p in ps}  # 지정 당시 공시지가 (이력 없으면 현재 값)
+    gj = [v for v in gja.values() if v]
     st = min((dist_m((c.x, c.y), (s['x'], s['y'])) for s in P.st), default=None)
     sg = sgg or ps[0]['p'][:5]
     mk = lambda key: P.mk.get(key) or {}
@@ -129,7 +134,7 @@ def features(P, g, ref, sgg=None):
     #   사업비 = 연면적 × 1.4(지하 포함) × 그해 공사비 / 종전 = 공시지가 합 ÷ 0.7(시세 반영률)
     p_new = (m_dong.get('mn') or m_dong.get('m') or m_gu.get('mn') or m_gu.get('m') or 0) * 1e4  # 원/㎡
     gfa = far_allow / 100 * ar
-    prior = sum(p.get('gj', 0) * p.get('ar', 0) for p in ps) / 0.7
+    prior = sum((gja[p['p']] or 0) * p.get('ar', 0) for p in ps) / 0.7
     f['apt_dong_new'] = m_dong.get('mn') or m_dong.get('m')
     by = next((P.base[y] for y in range(ref, ref + 4) if y in P.base), None)
     f['apt_dong_rel'] = round(f['apt_dong_new'] / by, 3) if f['apt_dong_new'] and by else None  # 그해 서울 구별 신축 시세 중위 대비 (1 = 서울 중간)
@@ -147,6 +152,15 @@ OT_ALL = {'개인', '법인', '국공유', '종중', '종교단체', '기타'}
 
 
 CCI = {2006: 75, 2010: 85, 2015: 100, 2020: 118, 2022: 140, 2024: 148, 2026: 152}  # 건설공사비지수 근사 (2015=100)
+
+
+def gj_at(P, p, ref):
+    """ref년 공시지가: 이력에서 ref 이전 가장 가까운 해(없으면 가장 이른 해), 이력이 없으면 현재 공시지가"""
+    h = P.gh.get(p['p'])
+    if h and P.gy:
+        cand = [(y, v) for y, v in zip(P.gy, h) if v]
+        if cand: return max((c for c in cand if c[0] <= ref), default=min(cand))[1]
+    return p.get('gj') or None
 
 
 def cost_m2(y):  # 연면적 ㎡당 공사비(원) 근사: 2015년 160만원 × 지수

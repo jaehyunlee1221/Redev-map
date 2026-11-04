@@ -45,14 +45,17 @@ def test_end_to_end(tmp_path, monkeypatch):
     monkeypatch.setattr(fetch, 'vw', lambda layer, **k: layers[layer])
     LU = [dict(pnu='9999910100100010000', prposAreaDstrcCode='UQA122', prposAreaDstrcCodeNm='제2종일반주거지역', cnflcAt='1'),
           dict(pnu='9999910100100010000', prposAreaDstrcCode='UBA100', prposAreaDstrcCodeNm='정비구역', cnflcAt='1')]
-    monkeypatch.setattr(fetch, 'ned', lambda p, url=fetch.NED: LU if url == fetch.LU else [
+    LPR = lambda y: [dict(pnu='9999910100100010000', pblntfPclnd=str(1000 * int(y)))]
+    monkeypatch.setattr(fetch, 'ned', lambda p, url=fetch.NED, **kw: LU if url == fetch.LU else LPR(kw['stdrYear']) if url == fetch.LP else [
         dict(pnu='9999910100100010000', cnrsPsnSn='1', cnrsPsnCo='2', posesnSeCodeNm='개인', lndpclAr='70', lndcgrCodeNm='대'),
         dict(pnu='9999910100100010000', cnrsPsnSn='2', posesnSeCodeNm='개인')])
     monkeypatch.setattr(fetch, 'bh', lambda s, b: [B('0001', '19800101'), B('0002', '20250101', hoCnt='6', regstrGbCdNm='집합')])
 
     fetch.main('99999', 'vworld')
-    assert sorted(p.name for p in (seed / '99999').iterdir()) == ['9999910100_landuse.json.gz', '9999910100_owners.json.gz',
-                                                                  '9999910100_parcels.json.gz', '9999910100_zones.json.gz', 'dongs.json.gz']
+    assert sorted(p.name for p in (seed / '99999').iterdir()) == ['9999910100_landuse.json.gz', '9999910100_owners.json.gz', '9999910100_parcels.json.gz',
+                                                                  '9999910100_prices.json.gz', '9999910100_zones.json.gz', 'dongs.json.gz']
+    pr = common.rd('99999', '9999910100_prices.json')
+    assert pr['_y'] == list(fetch.PRICE_YEARS) and pr['9999910100100010000'][1] == 2008000
     lu = common.rd('99999', '9999910100_landuse.json')
     assert lu['9999910100100010000'] == [['UQA122', '1'], ['UBA100', '1']] and lu['_c']['UBA100'] == '정비구역'
     assert not raw.exists()
