@@ -102,11 +102,17 @@ def features(P, g, ref, sgg=None):
         **{f'{k}_km': dist_m((c.x, c.y), v) / 1000 for k, v in LANDMARK.items()},
         apt_gu=m_gu.get('m'), apt_gu_new=m_gu.get('mn'),
         seoul=int(sg.startswith('11')), sgg=sg, cx=round(c.x, 6), cy=round(c.y, 6))
-    sh = lambda key, vals: sum(p.get('ar', 0) for p in ps if p.get(key) in vals) / ar  # 면적 비율
+    from .build import land_type
+    def lt_at(p):  # 기준연도 시점 토지 유형 (그 뒤 신축·철거가 섞이지 않게 그때 있던 건물로)
+        b0 = [b for b in P.bld.get(p['p'], []) if (year(b.get('useAprDay')) or 0) <= ref]
+        pu = (max(b0, key=lambda b: num(b.get('totArea'))).get('mainPurpsCdNm') or '') if b0 else ''
+        return land_type(p.get('jm') or '', pu, len(b0))
+    lts = {p['p']: lt_at(p) for p in ps}
+    sh = lambda key, vals: sum(p.get('ar', 0) for p in ps if (lts[p['p']] if key == 'lt' else p.get(key)) in vals) / ar  # 면적 비율
     for k, v in LT_VARS.items(): f[k] = sh('lt', v)
     known = sh('ot', OT_ALL)
     for k, v in OT_VARS.items(): f[k] = sh('ot', v) / known if known > 0.3 else None  # 소유자 유형은 소유정보가 있는 면적 기준 (v3 수집 전엔 대부분 없음)
-    f['n_relig'] = sum(1 for p in ps if p.get('lt') == '종교'); f['n_school'] = sum(1 for p in ps if p.get('lt') == '학교')
+    f['n_relig'] = sum(1 for v in lts.values() if v == '종교'); f['n_school'] = sum(1 for v in lts.values() if v == '학교')
     if f['apt_gu_new'] and f['gj_med']: f['price_gap'] = f['apt_gu_new'] * 1e4 / f['gj_med']  # 신축 아파트 ㎡가 / 공시지가 ㎡가 → 사업성 근사
     return {k: (round(v, 4) if isinstance(v, float) else v) for k, v in f.items()}
 
