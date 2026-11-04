@@ -66,5 +66,6 @@ def agg_owners(rows):
         if u == LAND: co[u] = max(co[u], int(num(r.get('cnrsPsnCo'))))  # 공유인수는 토지 공유에만 의미 (집합건물 호별 행엔 대지 전체 공유자 수가 붙음)
     r0 = rows[0]
     return dict(ol=len(sn), oh=sum(max(len(sn[u]), co[u], 1) for u in sn), pub=int(not sn),
-                ar=round(num(r0.get('lndpclAr')), 1), jm=r0.get('lndcgrCodeNm') or '',
+                ar=round(num(r0.get('lndpclAr')), 1),  # 주의: 공유·집합 필지는 지분 면적 → build에서 도형 면적으로 덮어씀
+                jm=r0.get('lndcgrCodeNm') or '',
                 gj=int(num(r0.get('pblntfPclnd'))), cg=max(str(r.get('ownshipChgDe') or '') for r in rows)[:7])
