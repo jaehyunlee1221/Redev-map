@@ -40,6 +40,11 @@ class Parcels:
         self.st = json.loads(st.read_text(encoding='utf-8')) if st.exists() else []
         mk = RAW / 'market.json'
         self.mk = json.loads(mk.read_text(encoding='utf-8')) if mk.exists() else {}
+        yr = defaultdict(list)  # 연도별 서울 전체 구 신축 시세 중위 → 지정 당시 '상대' 시세 (시기 효과 제거)
+        for k, v in self.mk.items():
+            ks = k.split('|')
+            if len(ks) == 2 and ks[0].startswith('11') and (v.get('mn') or v.get('m')): yr[int(ks[1])].append(v.get('mn') or v.get('m'))
+        self.base = {y: sorted(v)[len(v) // 2] for y, v in yr.items()}
         dg = OUT / 'dongs.geojson'  # 법정동 코드 → 동 이름 (실거래 동별 시세 찾기)
         self.dn = {f['properties']['c']: f['properties']['n'].split()[-1] for f in json.loads(dg.read_text(encoding='utf-8'))['features']
                    if f['properties'].get('n')} if dg.exists() else {}
@@ -126,6 +131,9 @@ def features(P, g, ref, sgg=None):
     gfa = far_allow / 100 * ar
     prior = sum(p.get('gj', 0) * p.get('ar', 0) for p in ps) / 0.7
     f['apt_dong_new'] = m_dong.get('mn') or m_dong.get('m')
+    by = next((P.base[y] for y in range(ref, ref + 4) if y in P.base), None)
+    f['apt_dong_rel'] = round(f['apt_dong_new'] / by, 3) if f['apt_dong_new'] and by else None  # 그해 서울 구별 신축 시세 중위 대비 (1 = 서울 중간)
+    f['apt_gu_rel'] = round((m_gu.get('mn') or m_gu.get('m')) / by, 3) if (m_gu.get('mn') or m_gu.get('m')) and by else None
     f['gfa_per_owner'] = round(gfa / f['owners'], 1) if f['owners'] else None  # 소유자 1명당 지을 수 있는 연면적(㎡)
     f['feas'] = round((gfa * 0.75 * p_new - gfa * 1.4 * cost_m2(ref)) / prior, 3) if p_new and prior and gfa else None
     if f['apt_gu_new'] and f['gj_med']: f['price_gap'] = f['apt_gu_new'] * 1e4 / f['gj_med']  # 신축 아파트 ㎡가 / 공시지가 ㎡가 → 사업성 근사
