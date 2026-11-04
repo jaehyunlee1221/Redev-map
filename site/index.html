@@ -43,7 +43,8 @@
 <div id="map"></div>
 <div id="bar">
   <b>재개발 지도</b>
-  <select id="mode">
+  <label style="display:flex;align-items:center;gap:4px" title="확대했을 때 필지마다 노후도 등으로 색칠"><input type="checkbox" id="pv">필지 색칠</label>
+  <select id="mode" disabled>
     <option value="age">노후도</option>
     <option value="own">추정 소유자 수</option>
     <option value="new">최근 신축</option>
@@ -142,7 +143,20 @@ function msg(t) { $('msg').textContent = t; $('msg').style.display = t ? 'block'
 
 function setMode(m) {
   map.setPaintProperty('p-fill', 'fill-color', MODES[m].c);
-  $('legend').innerHTML = MODES[m].lg.map(([c, t]) => `<i style="background:${c}"></i>${t}`).join('');
+  setView();
+}
+function setView() {  // 필지 색칠 켜면 필지별 지표, 끄면 구역 전체가 잘 보이게 (필지는 투명하게 남겨 클릭은 그대로)
+  const on = $('pv').checked, m = $('mode').value;
+  $('mode').disabled = !on;
+  try { localStorage.setItem('pv', on ? '1' : ''); } catch (e) {}
+  map.setPaintProperty('p-fill', 'fill-opacity', on ? ['interpolate', ['linear'], ['zoom'], 14, 0.75, 18, 0.55] : 0);
+  map.getLayer('d-fill') && map.setPaintProperty('d-fill', 'fill-opacity', on ? 0.45 : 0.25);
+  if (map.getLayer('zp-fill')) {
+    map.setPaintProperty('zp-fill', 'fill-opacity', on ? ['interpolate', ['linear'], ['zoom'], 12, 0.35, 15, 0.12] : ['interpolate', ['linear'], ['zoom'], 12, 0.4, 16, 0.3]);
+    map.setPaintProperty('zp-line', 'line-width', on ? ['interpolate', ['linear'], ['zoom'], 12, 1.2, 16, 3] : ['interpolate', ['linear'], ['zoom'], 12, 1.5, 16, 3.5]);
+  }
+  $('legend').innerHTML = on ? MODES[m].lg.map(([c, t]) => `<i style="background:${c}"></i>${t}`).join('')
+    : '정비사업 단계 ' + [['#9ca3af', '후보·계획'], ...STAGES.slice(0, 8).filter((_, i) => i % 2 === 0 || i === 7).map(t => [SCOL[STAGES.indexOf(t)], t])].map(([c, t]) => `<i style="background:${c}"></i>${t}`).join('');
 }
 
 async function load(bb) {  // bb=[w,s,e,n] 와 겹치는 동 필지 속성 로드 (구역 그리기 통계용)
@@ -205,12 +219,14 @@ map.on('style.load', async () => {
   map.addLayer({ id: 'dr-fill', type: 'fill', source: 'draw', filter: ['==', '$type', 'Polygon'], paint: { 'fill-color': '#2563eb', 'fill-opacity': 0.12 } });
   map.addLayer({ id: 'dr-line', type: 'line', source: 'draw', paint: { 'line-color': '#2563eb', 'line-width': 2.5, 'line-dasharray': [2, 1] } });
   map.addLayer({ id: 'dr-pt', type: 'circle', source: 'draw', filter: ['==', '$type', 'Point'], paint: { 'circle-radius': 5, 'circle-color': '#2563eb', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+  try { $('pv').checked = localStorage.getItem('pv') === '1'; } catch (e) {}
   setMode('age');
   const b = dongs.features.map(f => f.properties.b).filter(Boolean);
   if (b.length) map.fitBounds([[Math.min(...b.map(x => x[0])), Math.min(...b.map(x => x[1]))], [Math.max(...b.map(x => x[2])), Math.max(...b.map(x => x[3]))]], { padding: 30, duration: 0 });
 });
 
 $('mode').onchange = e => setMode(e.target.value);
+$('pv').onchange = setView;
 function zfilter() {  // 정비사업 / 소규모·역세권 보이기
   const a = $('zn').checked, b = $('zs2').checked, small = ['in', ['coalesce', ['get', 'c'], ''], ['literal', SMALLG]];
   const f = a && b ? null : a ? ['!', small] : b ? small : ['==', 1, 0];

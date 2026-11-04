@@ -3,7 +3,7 @@
   기준연도(ref) 시점으로 노후도·건물수를 다시 계산 → 해제 뒤 새로 지은 빌라가 '해제라서 노후도 낮음'으로 섞이지 않게
   python -m pipeline.features  → data/raw/zone_features.json (+ DUMP=1이면 로그로)"""
 import os, re, json, math, gzip, base64
-from collections import defaultdict
+from collections import defaultdict, Counter
 from shapely.geometry import shape, Point
 from shapely import STRtree
 from shapely.affinity import scale
@@ -40,6 +40,9 @@ class Parcels:
         self.st = json.loads(st.read_text(encoding='utf-8')) if st.exists() else []
         mk = RAW / 'market.json'
         self.mk = json.loads(mk.read_text(encoding='utf-8')) if mk.exists() else {}
+        dg = OUT / 'dongs.geojson'  # 법정동 코드 → 동 이름 (실거래 동별 시세 찾기)
+        self.dn = {f['properties']['c']: f['properties']['n'].split()[-1] for f in json.loads(dg.read_text(encoding='utf-8'))['features']
+                   if f['properties'].get('n')} if dg.exists() else {}
 
     def inside(self, g):
         return [self.props[i] for i in self.tree.query(g, predicate='contains')]
@@ -73,6 +76,9 @@ def features(P, g, ref, sgg=None):
     sg = sgg or ps[0]['p'][:5]
     mk = lambda key: P.mk.get(key) or {}
     m_gu = next((mk(f'{sg}|{y}') for y in range(ref, ref + 4) if mk(f'{sg}|{y}')), {})
+    dc = Counter(p['p'][:10] for p in ps).most_common(1)[0][0]
+    umd = P.dn.get(dc)
+    m_dong = next((mk(f'{sg}|{umd}|{y}') for y in range(ref, ref + 4) if mk(f'{sg}|{umd}|{y}')), {}) if umd else {}
     jip = sum(1 for b in pre if '집합' in (b.get('regstrGbCdNm') or ''))
     f = dict(
         area_ha=round(ha, 3), n_parcel=len(ps), n_bldg=len(pre), bldg_per_ha=len(pre) / ha,
@@ -113,6 +119,15 @@ def features(P, g, ref, sgg=None):
     known = sh('ot', OT_ALL)
     for k, v in OT_VARS.items(): f[k] = sh('ot', v) / known if known > 0.3 else None  # 소유자 유형은 소유정보가 있는 면적 기준 (v3 수집 전엔 대부분 없음)
     f['n_relig'] = sum(1 for v in lts.values() if v == '종교'); f['n_school'] = sum(1 for v in lts.values() if v == '학교')
+    # 사업성 추정 (지정 당시 기준, 단순 비례율 근사):
+    #   종후 = 허용 용적률 연면적 × 0.75(전용 비율) × 그 동(없으면 구) 신축 아파트 ㎡당 시세
+    #   사업비 = 연면적 × 1.4(지하 포함) × 그해 공사비 / 종전 = 공시지가 합 ÷ 0.7(시세 반영률)
+    p_new = (m_dong.get('mn') or m_dong.get('m') or m_gu.get('mn') or m_gu.get('m') or 0) * 1e4  # 원/㎡
+    gfa = far_allow / 100 * ar
+    prior = sum(p.get('gj', 0) * p.get('ar', 0) for p in ps) / 0.7
+    f['apt_dong_new'] = m_dong.get('mn') or m_dong.get('m')
+    f['gfa_per_owner'] = round(gfa / f['owners'], 1) if f['owners'] else None  # 소유자 1명당 지을 수 있는 연면적(㎡)
+    f['feas'] = round((gfa * 0.75 * p_new - gfa * 1.4 * cost_m2(ref)) / prior, 3) if p_new and prior and gfa else None
     if f['apt_gu_new'] and f['gj_med']: f['price_gap'] = f['apt_gu_new'] * 1e4 / f['gj_med']  # 신축 아파트 ㎡가 / 공시지가 ㎡가 → 사업성 근사
     return {k: (round(v, 4) if isinstance(v, float) else v) for k, v in f.items()}
 
@@ -121,6 +136,17 @@ LT_VARS = dict(lt_apt={'공동주택'}, lt_house={'단독주택'}, lt_nbhd={'근
                lt_road={'도로'}, lt_park={'공원'}, lt_vacant={'나대지'})  # 토지 유형별 면적 비율 (build.land_type)
 OT_VARS = dict(ow_ind={'개인'}, ow_corp={'법인'}, ow_pub={'국공유'}, ow_clan={'종중', '종교단체'})  # 소유자 유형별 면적 비율
 OT_ALL = {'개인', '법인', '국공유', '종중', '종교단체', '기타'}
+
+
+CCI = {2006: 75, 2010: 85, 2015: 100, 2020: 118, 2022: 140, 2024: 148, 2026: 152}  # 건설공사비지수 근사 (2015=100)
+
+
+def cost_m2(y):  # 연면적 ㎡당 공사비(원) 근사: 2015년 160만원 × 지수
+    ks = sorted(CCI)
+    y = min(max(y, ks[0]), ks[-1])
+    lo = max(k for k in ks if k <= y); hi = min(k for k in ks if k >= y)
+    v = CCI[lo] if lo == hi else CCI[lo] + (CCI[hi] - CCI[lo]) * (y - lo) / (hi - lo)
+    return 1.6e6 * v / 100
 
 
 def circle(x, y, area_m2):  # 면적이 같은 원 (위경도 비율 보정)
