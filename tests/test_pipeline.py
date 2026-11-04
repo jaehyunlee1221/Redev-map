@@ -195,11 +195,12 @@ def test_score(tmp_path, monkeypatch):
                  s='사업시행' if i < 200 else '조합설립')
         if k == 'released': r['owners_per_ha'] += 1
         rows.append(r)
+    rows += [dict(rows[-1], kind='plus_c', id=900, s='기획완료', psi=-1), dict(rows[-1], kind='plus_c', id=901, s='착공', psi=7)]
     monkeypatch.setattr(score, 'RAW', tmp_path); monkeypatch.setattr(score, 'OUT', tmp_path)
     (tmp_path / 'zone_features.json').write_text(json.dumps(rows))
     score.main()
     z = json.loads((tmp_path / 'zscore.json').read_text())
-    assert z['meta']['n_bad'] == 120 and len(z['z']) == 60  # 조합설립 단계만 점수
+    assert z['meta']['n_bad'] == 120 and len(z['z']) == 61 and '900' in z['z'] and '901' not in z['z']  # 조합설립 이전 + 신통 후보(착공은 제외)
     v = next(iter(z['z'].values()))
     assert 1 <= v['g'] <= 5 and isinstance(v['up'], list)
 

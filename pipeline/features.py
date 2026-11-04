@@ -158,7 +158,14 @@ def main():
     rows = []
     for i, z in enumerate(zs):
         pr = z['properties']
-        if pr.get('c'): continue  # 서울플랜+에서 덧붙인 사업(신통기획·모아타운 등)은 모델 대상 아님
+        if pr.get('c'):  # 서울플랜+에서 덧붙인 사업: 도시정비법 정비사업이 될 신통기획·정비사업만 점수용 변수 (학습엔 안 씀)
+            if pr['c'] not in ('신통기획', '정비사업') or not pr.get('ba'): continue
+            ref = int((pr.get('pd') or '2026')[:4])
+            f = features(P, circle(*z['geometry']['coordinates'], pr['ba']), min(max(ref, 2006), 2026))
+            if f:
+                t = '재건축' if '재건축' in (pr.get('t') or '') or (f.get('lt_apt') or 0) > 0.5 else (pr.get('t') or '')  # 신통은 유형이 없어 공동주택 부지가 절반 넘으면 재건축으로
+                rows.append(dict(kind='plus_c', id=i, name=pr.get('n'), ref=ref, ty=ty(t), s=pr.get('s'), psi=pr.get('si'), c=pr['c'], **f))
+            continue
         ref = int((pr.get('zd') or pr.get('cm') or pr.get('jo') or '2026')[:4])
         ref = min(max(ref, 2006), 2026)
         meta = {k: pr.get(k) for k in ('t', 's', 'si', 'pp', 'gp', 'eh', 'bh', 'zd', 'cm', 'jo', 'sa', 'gc', 'ij', 'cs')}

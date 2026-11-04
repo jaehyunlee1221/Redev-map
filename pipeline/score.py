@@ -40,6 +40,7 @@ def load(path):
     d['log_area'] = np.log(d['area_ha'].clip(lower=0.1))
     d['log_gj'] = np.log(d['gj_med'].where(d['gj_med'] > 0))
     d['si'] = d['s'].map(STAGE) if 's' in d else np.nan
+    if 'psi' in d: d.loc[d.kind == 'plus_c', 'si'] = d.loc[d.kind == 'plus_c', 'psi']  # 서울플랜+ 사업은 단계 이름이 달라 redev.plus_si 값 (후보·기획 -1)
     tt = d['ty'].astype(str) if 'ty' in d else d['t'].astype(str)  # features.ty: 출처와 무관하게 같은 기준의 유형
     d['k_rebuild'] = (tt == '재건축').astype(int)
     d['k_dosi'] = (tt == '도시정비형').astype(int)
@@ -74,7 +75,8 @@ def main():
     if y.sum() < 30 or (1 - y).sum() < 20: return print(f'표본 부족 (해제 {y.sum()}, 사업시행 도달 {(1 - y).sum()}) → 등급 생략', flush=True)
     cv = cross_val_score(LGBMClassifier(**PARAMS), X, y, cv=RepeatedStratifiedKFold(n_splits=5, n_repeats=5, random_state=0), scoring='roc_auc')
     m = LGBMClassifier(**PARAMS).fit(X, y)
-    a = d[(d.kind == 'active_c') & (d.si <= 2)].copy()  # 아직 사업시행 전 단계(구역지정~조합설립)만 점수
+    a = d[d.kind.isin(['active_c', 'plus_c']) & (d.si.fillna(-1) <= 2)].copy()  # 아직 사업시행 전(구역지정~조합설립) + 신통기획 등 지정 전 후보
+    a = a.drop_duplicates('id', keep='first')
     Xa = a[cols].astype(float)
     a['risk'] = m.predict_proba(Xa)[:, 1]
     sh = m.predict(Xa, pred_contrib=True)[:, :-1]  # TreeSHAP (log-odds 기여, 마지막 열은 기준값)
