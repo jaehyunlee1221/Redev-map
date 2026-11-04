@@ -17,7 +17,7 @@ from sklearn.model_selection import StratifiedKFold, cross_val_predict
 from sklearn.metrics import roc_auc_score
 
 FULL = ['old_ratio', 'age_mean', 'bldg_per_ha', 'hh_per_ha', 'owners_per_ha', 'jiphap_ratio', 'new5_before_ref', 'small_ratio', 'dae_ratio',
-        'road_ratio', 'pub_ratio', 'far_room', 'far_now', 'z1', 'z2', 'z3', 'zcom', 'lu_plan', 'lu_heritage', 'log_area', 'log_gj',
+        'road_ratio', 'pub_ratio', 'far_room', 'far_now', 'z1', 'z2', 'z3', 'zcom', 'lu_heritage', 'log_area', 'log_gj',
         'station_m', 'cityhall_km', 'gangnam_km', 'yeouido_km', 'apt_gu', 'price_gap', 'k_rebuild', 'k_dosi']
 FIXED = ['log_area', 'station_m', 'cityhall_km', 'gangnam_km', 'yeouido_km', 'apt_gu', 'apt_gu_new', 'k_rebuild', 'k_dosi', 'seoul_ne', 'seoul_sw']
 STAGE = {'구역지정': 0, '추진위': 1, '조합설립': 2, '건축심의': 3, '사업시행': 4, '관리처분': 5, '이주': 6, '착공': 7, '준공': 8}
