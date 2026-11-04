@@ -16,7 +16,7 @@ from sklearn.model_selection import StratifiedKFold, cross_val_predict
 from sklearn.metrics import roc_auc_score
 
 sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parents[1]))
-from pipeline.score import FULL, FIXED, STAGE, PARAMS, load  # 변수 목록·전처리는 지도 등급(pipeline.score)과 공유
+from pipeline.score import FULL, FIXED, STAGE, PARAMS, load, usable  # 변수 목록·전처리는 지도 등급(pipeline.score)과 공유
 from lightgbm import LGBMClassifier
 
 
@@ -27,6 +27,7 @@ def ks(y, p):
 
 def fit(name, tr, cols):
     tr = tr.dropna(subset=['y'])
+    cols = usable(tr, cols)
     X, y = tr[cols].astype(float), tr.y.values.astype(int)
     print(f'\n=== {name}: good {int((1 - y).sum())} vs bad(해제) {int(y.sum())}')
     cv = StratifiedKFold(5, shuffle=True, random_state=0)
@@ -64,7 +65,7 @@ def main(path, out=None):
     _, res['B'], _ = fit('B) 관리처분 도달 vs 해제 (전체 변수)', B, FULL)
     _, res['C'], _ = fit('C) 사업시행 이상·완료 vs 해제 (시간불변 변수만)', C, FIXED)
     allact = d[d.kind == 'active_c'].copy()
-    allact['risk'] = mA.predict_proba(allact[FULL].astype(float))[:, 1]
+    allact['risk'] = mA.predict_proba(allact[usable(A, FULL)].astype(float))[:, 1]
     print('\n진행 구역 해제위험(모델 A) 단계별 중위:', allact.groupby('s').risk.median().round(3).to_dict())
     if out:
         json.dump(dict(metrics=res, coef=cA.round(4).to_dict(), scores={int(r.id): round(float(r.risk), 4) for r in allact.itertuples()}),

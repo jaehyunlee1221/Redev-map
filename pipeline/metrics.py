@@ -1,6 +1,6 @@
 """필지 단위 집계: 건축물(노후·신축·호수) / 소유(추정 소유자 수·국공유)"""
 import datetime
-from collections import defaultdict
+from collections import defaultdict, Counter
 from .common import CFG
 
 R = CFG['rules']
@@ -42,7 +42,8 @@ def agg_bldgs(bs):  # 주건축물만
                 hh=sum(int(num(b.get('hhldCnt')) + num(b.get('fmlyCnt'))) for b in m),
                 y0=min(ys, default=None), y1=max(ys, default=None),
                 pa=round(max((num(b.get('platArea')) for b in m), default=0)),  # 대장상 대지면적 (아파트 단지는 여러 필지 합)
-                vr=round(max((v for v in (num(b.get('vlRat')) for b in m) if 0 < v < 2000), default=0)))  # 대장에 적힌 용적률
+                vr=round(max((v for v in (num(b.get('vlRat')) for b in m) if 0 < v < 2000), default=0)),  # 대장에 적힌 용적률
+                pu=(max(m, key=lambda b: num(b.get('totArea'))).get('mainPurpsCdNm') or '').strip() if m else '')  # 주용도 (연면적 가장 큰 건물)
 
 
 UNIT = ('agbldgSn', 'buldDongNm', 'buldFloorNm', 'buldHoNm', 'buldRoomNm')
@@ -51,6 +52,13 @@ LAND = ('0000',) * 5
 
 def unit(r):  # 구분소유 단위 (동·층·호). 일반 토지는 LAND
     return tuple(r.get(k) or '0000' for k in UNIT)
+
+
+def owner_class(v):
+    """소유구분(posesnSeCodeNm) → 개인 / 법인 / 국공유 / 종중 / 종교단체 / 기타"""
+    v = v or ''
+    return ('국공유' if '유지' in v or '국유' in v else '법인' if '법인' in v else '종중' if '종중' in v else '종교단체' if '종교' in v
+            else '개인' if '개인' in v or '외국' in v else '기타')
 
 
 def agg_owners(rows):
@@ -68,4 +76,5 @@ def agg_owners(rows):
     return dict(ol=len(sn), oh=sum(max(len(sn[u]), co[u], 1) for u in sn), pub=int(not sn),
                 ar=round(num(r0.get('lndpclAr')), 1),  # 주의: 공유·집합 필지는 지분 면적 → build에서 도형 면적으로 덮어씀
                 jm=r0.get('lndcgrCodeNm') or '',
-                gj=int(num(r0.get('pblntfPclnd'))), cg=max(str(r.get('ownshipChgDe') or '') for r in rows)[:7])
+                gj=int(num(r0.get('pblntfPclnd'))), cg=max(str(r.get('ownshipChgDe') or '') for r in rows)[:7],
+                ot=Counter(owner_class(r.get('posesnSeCodeNm')) for r in rows).most_common(1)[0][0])  # 주된 소유자 유형 (행 수 기준)

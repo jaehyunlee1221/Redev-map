@@ -16,7 +16,7 @@ LU = 'https://api.vworld.kr/ned/data/getLandUseAttr'  # 토지이용계획 (필�
 BH = 'https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo'
 VK, DK, DOM = (os.environ.get(k, '') for k in ('VWORLD_KEY', 'DATA_GO_KR_KEY', 'VWORLD_DOMAIN'))
 DAYS = dict(dongs=90, parcels=90, zones=90, owners=30, landuse=60, bldgs=25)  # 이 기간 안에 받은 파일은 건너뜀
-VER = dict(owners=2, landuse=1)  # 집계 방식이 바뀌면 올림 → 예전 파일은 기한 내라도 다시 받음
+VER = dict(owners=3, landuse=1)  # 집계 방식이 바뀌면 올림 → 예전 파일은 기한 내라도 다시 받음
 ERR = []
 
 

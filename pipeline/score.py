@@ -8,7 +8,8 @@ from .common import RAW, OUT
 
 FULL = ['old_ratio', 'age_mean', 'bldg_per_ha', 'hh_per_ha', 'owners_per_ha', 'jiphap_ratio', 'new5_before_ref', 'small_ratio', 'dae_ratio',
         'road_ratio', 'pub_ratio', 'far_room', 'far_now', 'z1', 'z2', 'z3', 'zcom', 'lu_heritage', 'log_area', 'log_gj',
-        'station_m', 'cityhall_km', 'gangnam_km', 'yeouido_km', 'apt_gu', 'price_gap', 'k_rebuild', 'k_dosi']
+        'station_m', 'cityhall_km', 'gangnam_km', 'yeouido_km', 'apt_gu', 'price_gap', 'k_rebuild', 'k_dosi',
+        'lt_apt', 'lt_house', 'lt_nbhd', 'lt_comm', 'lt_vacant', 'has_relig', 'has_school', 'ow_ind', 'ow_corp', 'ow_pub', 'ow_clan']
 FIXED = ['log_area', 'station_m', 'cityhall_km', 'gangnam_km', 'yeouido_km', 'apt_gu', 'apt_gu_new', 'k_rebuild', 'k_dosi', 'seoul_ne', 'seoul_sw']
 STAGE = {'구역지정': 0, '추진위': 1, '조합설립': 2, '건축심의': 3, '사업시행': 4, '관리처분': 5, '이주': 6, '착공': 7, '준공': 8}
 pct = lambda v: f'{v:.0%}'
@@ -23,6 +24,10 @@ LABEL = {  # 변수 → (이름, 값 표시)
     'log_gj': ('공시지가 중위', lambda v: f'{np.exp(v) / 1e4:,.0f}만원/㎡'), 'station_m': ('지하철역 거리', lambda v: f'{v:,.0f}m'),
     'cityhall_km': ('시청 거리', lambda v: f'{v:.1f}km'), 'gangnam_km': ('강남역 거리', lambda v: f'{v:.1f}km'), 'yeouido_km': ('여의도 거리', lambda v: f'{v:.1f}km'),
     'apt_gu': ('구 아파트 시세(지정 당시)', lambda v: f'{v:,.0f}만원/㎡'), 'price_gap': ('신축 시세/공시지가', lambda v: f'{v:.1f}배'),
+    'lt_apt': ('공동주택 부지 비율', pct), 'lt_house': ('단독주택 부지 비율', pct), 'lt_nbhd': ('근린생활시설 부지 비율', pct),
+    'lt_comm': ('상업·업무시설 부지 비율', pct), 'lt_vacant': ('나대지 비율', pct), 'has_relig': ('종교시설', lambda v: '있음' if v else '없음'),
+    'has_school': ('학교', lambda v: '있음' if v else '없음'), 'ow_ind': ('개인 소유 면적 비율', pct), 'ow_corp': ('법인 소유 면적 비율', pct),
+    'ow_pub': ('국공유지 면적 비율', pct), 'ow_clan': ('종중·종교단체 소유 비율', pct),
     'k_rebuild': ('사업 유형', lambda v: '재건축' if v else '재개발'), 'k_dosi': ('도시정비형', lambda v: '예' if v else '아니오'),
 }
 PARAMS = dict(n_estimators=300, learning_rate=0.03, num_leaves=7, max_depth=3, min_child_samples=15, subsample=0.8, subsample_freq=1,
@@ -37,9 +42,15 @@ def load(path):
     tt = d['ty'].astype(str) if 'ty' in d else d['t'].astype(str)  # features.ty: 출처와 무관하게 같은 기준의 유형
     d['k_rebuild'] = (tt == '재건축').astype(int)
     d['k_dosi'] = (tt == '도시정비형').astype(int)
+    for k, c in (('has_relig', 'n_relig'), ('has_school', 'n_school')): d[k] = (d[c].fillna(0) > 0).astype(int) if c in d else np.nan
     d['seoul_ne'] = ((d.cx > 127.0) & (d.cy > 37.57)).astype(int)   # 동북권 대략
     d['seoul_sw'] = ((d.cx < 126.95) & (d.cy < 37.53)).astype(int)  # 서남권 대략
     return d
+
+
+def usable(d, cols):
+    """값이 있는 변수만 (예: 소유자 유형은 PC에서 소유정보 v3를 다시 받기 전엔 비어 있음)"""
+    return [c for c in cols if c in d and d[c].notna().mean() > 0.5]
 
 
 def samples(d):
@@ -57,26 +68,27 @@ def main():
     d = load(RAW / 'zone_features.json')
     _, bad, act, _ = samples(d)
     tr = pd.concat([bad, act[act.si.between(5, 6)].assign(y=0)])  # 관리처분~이주 (착공 전 → 옛 건물 남아 있음)
-    X, y = tr[FULL].astype(float), tr.y.values.astype(int)
+    cols = usable(tr, FULL)
+    X, y = tr[cols].astype(float), tr.y.values.astype(int)
     if y.sum() < 30 or (1 - y).sum() < 20: return print(f'표본 부족 (해제 {y.sum()}, 관리처분 {(1 - y).sum()}) → 등급 생략', flush=True)
     cv = cross_val_score(LGBMClassifier(**PARAMS), X, y, cv=RepeatedStratifiedKFold(n_splits=5, n_repeats=5, random_state=0), scoring='roc_auc')
     m = LGBMClassifier(**PARAMS).fit(X, y)
     a = d[(d.kind == 'active_c') & (d.si <= 3)].copy()  # 사업시행 전 단계만 (그 뒤는 철거·이주로 변수 왜곡)
-    Xa = a[FULL].astype(float)
+    Xa = a[cols].astype(float)
     a['risk'] = m.predict_proba(Xa)[:, 1]
     sh = m.predict(Xa, pred_contrib=True)[:, :-1]  # TreeSHAP (log-odds 기여, 마지막 열은 기준값)
     a['pr'] = a.risk.rank(pct=True)
     out = {}
     for (_, r), s in zip(a.iterrows(), sh):
         o = np.argsort(-s)
-        why = lambda idx: [f'{LABEL[FULL[j]][0]} {LABEL[FULL[j]][1](r[FULL[j]])}' for j in idx if not pd.isna(r[FULL[j]])][:3]
+        why = lambda idx: [f'{LABEL[cols[j]][0]} {LABEL[cols[j]][1](r[cols[j]])}' for j in idx if not pd.isna(r[cols[j]])][:3]
         out[str(int(r.id))] = dict(g=min(int(r.pr * 5) + 1, 5), p=round(float(r.pr), 3),
                                    up=why([j for j in o if s[j] > 0.05]), dn=why([j for j in o[::-1] if s[j] < -0.05]))
     meta = dict(model='LightGBM', target='관리처분인가 도달 vs 해제 (지정 2003~2015)', n_bad=int(y.sum()), n_good=int((1 - y).sum()),
                 auc=round(float(cv.mean()), 3), auc_sd=round(float(cv.std()), 3), n_scored=len(out))
     (OUT / 'zscore.json').write_text(json.dumps(dict(meta=meta, z=out), ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     print(f"해제위험 등급 {len(out)}개 구역 · 학습 해제 {meta['n_bad']} vs 관리처분 {meta['n_good']} · CV AUC {meta['auc']} ± {meta['auc_sd']}", flush=True)
-    imp = pd.Series(np.abs(m.predict(X, pred_contrib=True)[:, :-1]).mean(0), index=FULL).sort_values(ascending=False)
+    imp = pd.Series(np.abs(m.predict(X, pred_contrib=True)[:, :-1]).mean(0), index=cols).sort_values(ascending=False)
     print('  SHAP 평균 영향 상위:', ', '.join(f'{LABEL[k][0]} {v:.2f}' for k, v in imp.head(8).items()), flush=True)
 
 

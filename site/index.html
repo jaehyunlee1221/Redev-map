@@ -52,6 +52,7 @@
   </select>
   <button id="zl">정비사업 목록</button>
   <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="zn" checked>정비사업</label>
+  <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="zs2" checked>소규모·역세권</label>
   <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="rz">건축규제구역</label>
   <button id="draw">구역 그리기</button>
   <button id="done" style="display:none">계산</button>
@@ -128,7 +129,14 @@ const STAGES = ['구역지정', '추진위', '조합설립', '건축심의', '�
 const SCOL = ['#fcd34d', '#fb923c', '#f97316', '#ea580c', '#dc2626', '#be123c', '#9d174d', '#6d28d9', '#374151'];
 const scol = i => SCOL[i] ?? '#9ca3af';
 const DLAB = [['zd', '구역지정'], ['cm', '추진위 승인'], ['jo', '조합설립 인가'], ['sa', '사업시행 인가'], ['gc', '관리처분 인가'], ['ij', '이주 시작'], ['cs', '착공']];
-let Z = [];
+let Z = [], ZP = [];
+// 서울플랜+에서 덧붙인 사업 유형 (c) → 테두리 색. 정비사업(서울시 통계)은 c 없음
+const CCOL = { '신통기획': '#2563eb', '정비사업': '#111827', '모아타운': '#059669', '가로주택': '#0d9488', '소규모재건축': '#0d9488', '소규모재개발': '#0d9488',
+  '자율주택': '#0d9488', '역세권활성화': '#7c3aed', '역세권장기전세': '#7c3aed', '역세권안심주택': '#a78bfa',
+  '모아타운 관리지역': '#059669', '소규모정비 사업구역': '#0d9488', '도심 공공주택 복합지구': '#b45309' };
+const SMALLG = ['모아타운', '가로주택', '소규모재건축', '소규모재개발', '자율주택', '역세권활성화', '역세권장기전세', '역세권안심주택', '모아타운 관리지역', '소규모정비 사업구역'];
+const ccol = c => CCOL[c] || '#fff';
+const catOf = p => p.c || '정비사업(서울시)';
 
 function msg(t) { $('msg').textContent = t; $('msg').style.display = t ? 'block' : 'none'; }
 
@@ -139,7 +147,7 @@ function setMode(m) {
 
 async function load(bb) {  // bb=[w,s,e,n] 와 겹치는 동 필지 속성 로드 (구역 그리기 통계용)
   const need = dongs.features.filter(f => { const b = f.properties.b;
-    return !loaded.has(f.properties.c) && b[0] < bb[2] && b[2] > bb[0] && b[1] < bb[3] && b[3] > bb[1]; });
+    return b && !loaded.has(f.properties.c) && b[0] < bb[2] && b[2] > bb[0] && b[1] < bb[3] && b[3] > bb[1]; });
   if (!need.length) return;
   msg(`필지 불러오는 중… (${need.length}개 동)`);
   await Promise.all(need.map(async f => {
@@ -172,21 +180,25 @@ map.on('style.load', async () => {
     ['r-fill', 'r-line'].forEach(l => map.setLayoutProperty(l, 'visibility', 'none'));
   } catch (e) { $('rz').parentElement.style.display = 'none'; }
   try {  // 정비구역 경계 (토지이용계획상 정비구역·재정비촉진구역 필지를 묶은 것)
-    map.addSource('zpoly', { type: 'geojson', data: await (await fetch(D('zonepoly.geojson'))).json() });
+    ZP = (await (await fetch(D('zonepoly.geojson'))).json()).features;
+    ZP.forEach((f, i) => f.properties.pi = i);
+    map.addSource('zpoly', { type: 'geojson', data: fc(ZP) });
     const zc = ['match', ['get', 'si'], ...SCOL.flatMap((c, i) => [i, c]), '#6b7280'];
+    const lc = ['case', ['has', 'c'], ['match', ['get', 'c'], ...Object.entries(CCOL).flat(), '#6b7280'], zc];  // 소규모·모아타운 등은 유형 색
     map.addLayer({ id: 'zp-fill', type: 'fill', source: 'zpoly', paint: { 'fill-color': zc, 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0.35, 15, 0.12] } });
-    map.addLayer({ id: 'zp-line', type: 'line', source: 'zpoly', paint: { 'line-color': zc, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.2, 16, 3] } });
+    map.addLayer({ id: 'zp-line', type: 'line', source: 'zpoly', paint: { 'line-color': lc, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.2, 16, 3],
+      'line-dasharray': ['case', ['has', 'c'], ['literal', [2, 1]], ['literal', [1, 0]]] } });
   } catch (e) {}
   try {  // 정비사업 구역 (대표 지번 위치)
     Z = (await (await fetch(D('zones.geojson'))).json()).features;
     try { ZS = await (await fetch(D('zscore.json'))).json(); } catch (e) {}  // 해제위험 등급 (모델)
     map.addSource('zones', { type: 'geojson', data: fc(Z) });
     map.addLayer({ id: 'z-pt', type: 'circle', source: 'zones', paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 5, 15, 9],
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, ['case', ['in', ['coalesce', ['get', 'c'], ''], ['literal', SMALLG]], 3, 5], 15, ['case', ['in', ['coalesce', ['get', 'c'], ''], ['literal', SMALLG]], 6, 9]],
       'circle-color': ['match', ['get', 'si'], ...SCOL.flatMap((c, i) => [i, c]), '#9ca3af'],
-      'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+      'circle-stroke-color': ['case', ['has', 'c'], ['match', ['get', 'c'], ...Object.entries(CCOL).flat(), '#fff'], '#fff'], 'circle-stroke-width': ['case', ['has', 'c'], 2.5, 2] } });
     map.addLayer({ id: 'z-lb', type: 'symbol', source: 'zones', minzoom: 13, layout: {
-      'text-field': ['concat', ['get', 'n'], '\n', ['get', 's']], 'text-font': ['Noto Sans Regular'], 'text-size': 12,
+      'text-field': ['concat', ['get', 'n'], '\n', ['case', ['has', 'c'], ['concat', ['get', 'c'], ' · '], ''], ['get', 's']], 'text-font': ['Noto Sans Regular'], 'text-size': 12,
       'text-offset': [0, 1.1], 'text-anchor': 'top', 'text-optional': true },
       paint: { 'text-color': '#111827', 'text-halo-color': '#fff', 'text-halo-width': 1.6 } });
   } catch (e) { $('zn').parentElement.style.display = $('zl').style.display = 'none'; }
@@ -194,12 +206,17 @@ map.on('style.load', async () => {
   map.addLayer({ id: 'dr-line', type: 'line', source: 'draw', paint: { 'line-color': '#2563eb', 'line-width': 2.5, 'line-dasharray': [2, 1] } });
   map.addLayer({ id: 'dr-pt', type: 'circle', source: 'draw', filter: ['==', '$type', 'Point'], paint: { 'circle-radius': 5, 'circle-color': '#2563eb', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
   setMode('age');
-  const b = dongs.features.map(f => f.properties.b);
+  const b = dongs.features.map(f => f.properties.b).filter(Boolean);
   if (b.length) map.fitBounds([[Math.min(...b.map(x => x[0])), Math.min(...b.map(x => x[1]))], [Math.max(...b.map(x => x[2])), Math.max(...b.map(x => x[3]))]], { padding: 30, duration: 0 });
 });
 
 $('mode').onchange = e => setMode(e.target.value);
-$('zn').onchange = e => ['z-pt', 'z-lb', 'zp-fill', 'zp-line'].forEach(l => map.getLayer(l) && map.setLayoutProperty(l, 'visibility', e.target.checked ? 'visible' : 'none'));
+function zfilter() {  // 정비사업 / 소규모·역세권 보이기
+  const a = $('zn').checked, b = $('zs2').checked, small = ['in', ['coalesce', ['get', 'c'], ''], ['literal', SMALLG]];
+  const f = a && b ? null : a ? ['!', small] : b ? small : ['==', 1, 0];
+  ['z-pt', 'z-lb', 'zp-fill', 'zp-line'].forEach(l => map.getLayer(l) && map.setFilter(l, f));
+}
+$('zn').onchange = $('zs2').onchange = zfilter;
 $('rz').onchange = e => ['r-fill', 'r-line'].forEach(l => map.getLayer(l) && map.setLayoutProperty(l, 'visibility', e.target.checked ? 'visible' : 'none'));
 const zoneInfo = pt => map.getLayer('r-fill') ? map.queryRenderedFeatures(pt, { layers: ['r-fill'] }).map(f => f.properties)
   .map(z => `<br><span style="color:#7c3aed">■ 건축규제 구역 ${({UDX100: '건축허가 제한', UDX200: '건축선·높이 등', UDX999: '기타'})[z.cd] || z.cd}${z.nm ? ' · ' + z.nm : ''}${z.dt ? ' · 고시 ' + z.dt.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : ''}</span>`).join('') : '';
@@ -210,7 +227,7 @@ map.on('click', e => {
   const z = map.getLayer('z-pt') && map.queryRenderedFeatures(e.point, { layers: ['z-pt'] })[0];
   if (z) return zonePopup(z);
   const zp = map.getLayer('zp-fill') && map.queryRenderedFeatures(e.point, { layers: ['zp-fill'] })[0]?.properties;
-  if (zp && map.getZoom() < 15) return zp.zi != null ? zonePopup(Z[zp.zi], e.lngLat) : new maplibregl.Popup().setLngLat(e.lngLat).setHTML('<b>정비구역</b><br>사업 정보 없음 (토지이용계획상 정비구역)').addTo(map);
+  if (zp && map.getZoom() < 15) return zp.zi != null ? zonePopup(Z[zp.zi], e.lngLat) : new maplibregl.Popup().setLngLat(e.lngLat).setHTML(`<b>${zp.n}</b><br>사업 정보 없음 (토지이용계획 기준 경계)<br><a href="#" onclick="polyStats(${zp.pi});return false">구역 분석 →</a>`).addTo(map);
   const p0 = map.queryRenderedFeatures(e.point, { layers: ['p-fill'] })[0]?.properties;
   const p = p0 && { nb: 0, no: 0, nu: 0, hh: 0, ho: 0, gj: 0, ar: 0, jm: '', ...p0 };
   const d = map.queryRenderedFeatures(e.point, { layers: ['d-fill'] })[0]?.properties;
@@ -219,7 +236,7 @@ map.on('click', e => {
       세대·가구 ${fmt(p.hh)} · 집합 호수 ${fmt(p.ho)}<br>
       ${farLine(p)}
       ${p.lu ? `<span style="color:#6b7280">${p.lu}</span><br>` : ''}
-      ${zp ? (zp.zi != null ? `<a href="#" onclick="zonePopup(Z[${zp.zi}]);return false" style="color:${scol(+zp.si)};font-weight:600">■ ${zp.n}${zp.s ? ' · ' + zp.s : ''} (자세히)</a><br>` : '<span style="color:#6b7280;font-weight:600">■ 정비구역 (사업 정보 없음)</span><br>') : ''}
+      ${zp ? (zp.zi != null ? `<a href="#" onclick="zonePopup(Z[${zp.zi}]);return false" style="color:${scol(+zp.si)};font-weight:600">■ ${zp.n}${zp.s ? ' · ' + zp.s : ''} (자세히)</a><br>` : `<a href="#" onclick="polyStats(${zp.pi});return false" style="color:${ccol(zp.c) === '#fff' ? '#6b7280' : ccol(zp.c)};font-weight:600">■ ${zp.n} (사업 정보 없음 · 분석)</a><br>`) : ''}
       추정 소유자 ${p.dp ? `같은 단지 → ${+p.dp.slice(11, 15)}${+p.dp.slice(15) ? '-' + +p.dp.slice(15) : ''}번지에 합산` : p.pub ? '국공유' : p.ol === p.oh ? p.ol + '명' : `${p.ol}~${p.oh}명`}${p.oe ? ' <span style="color:#9ca3af">(대체값)</span>' : ''}
       ${p.cg ? `<br>최근 소유권변동 ${p.cg}` : ''}`
     + zoneInfo(e.point)
@@ -249,32 +266,44 @@ function riskHtml(i) {  // 해제위험 등급 + SHAP 사유 (사업시행 전 �
 function zonePopup(f, at) {
   const z = f.properties, si = +z.si;
   const hh = z.bh ? `기존 ${fmt(z.eh)}세대 → <b>계획 ${fmt(z.bh)}세대</b>${z.sh || z.rh ? ` (분양 ${fmt(z.sh)} · 임대 ${fmt(z.rh)})` : ''}` : z.eh ? `기존 ${fmt(z.eh)}세대` : '';
-  const ds = DLAB.filter(([k]) => z[k]).map(([k, l]) => `<tr><td>${l}</td><td style="text-align:right">${z[k]}</td></tr>`).join('');
+  const tr = (l, v) => `<tr><td>${l}</td><td style="text-align:right">${v}</td></tr>`;
+  const ds = DLAB.filter(([k]) => z[k]).map(([k, l]) => tr(l, z[k])).join('')
+    + (z.pd ? tr(`${z.s} (서울플랜+)`, z.pd) : '') + (z.st ? tr('신속통합기획', z.st) : '')
+    + (z.ba ? tr('구역 면적', fmt(z.ba) + '㎡') : '') + (z.pf ? tr('계획 용적률', z.pf + '%') : '') + (z.fl ? tr('층수', z.fl) : '')
+    + (z.pu ? tr('계획 공급세대', fmt(z.pu) + (z.pr ? ` (임대 ${fmt(z.pr)})` : '')) : '') + (z.sbw ? tr('역세권', z.sbw) : '')
+    + (z.zb && z.za && z.zb !== z.za ? tr('용도지역', `${z.zb} → ${z.za}`) : '');
+  const i = Z.indexOf(f), hasPoly = ZP.some(x => x.properties.zi === i);
   document.querySelectorAll('.maplibregl-popup').forEach(x => x.remove());
   new maplibregl.Popup({ maxWidth: '300px' }).setLngLat(at || f.geometry.coordinates).setHTML(
-    `<b style="font-size:14px">${z.n}</b><br><span style="color:#6b7280">${[z.gu, z.t, z.pp, z.gp].filter(Boolean).join(' · ')}</span>
-     <div style="margin-top:6px">현재 단계 <b style="color:${scol(si)}">${z.s || '미상'}</b></div>
+    `${z.c ? `<span class="badge" style="background:${ccol(z.c)}">${z.c}</span> ` : ''}<b style="font-size:14px">${z.n}</b><br><span style="color:#6b7280">${[z.gu, z.c ? '' : z.t, z.pp, z.gp].filter(Boolean).join(' · ')}</span>
+     <div style="margin-top:6px">현재 단계 <b style="color:${scol(si)}">${z.s || '미상'}</b>${si < 0 ? ' <span style="color:#9ca3af">(후보·계획 단계)</span>' : ''}</div>
      <div class="steps">${STAGES.slice(0, 8).map((s, i) => `<span style="background:${i <= si ? scol(si) : ''}" title="${s}"></span>`).join('')}</div>
      <div class="stepn"><span>구역지정</span><span>조합</span><span>사업시행</span><span>관리처분</span><span>착공</span></div>
      ${hh ? `<div style="margin-top:6px">${hh}</div>` : ''}
      ${ds ? `<table style="width:100%;margin-top:6px;font-size:12px">${ds}</table>` : ''}
-     ${riskHtml(Z.indexOf(f))}
+     ${riskHtml(i)}
+     ${hasPoly ? `<button onclick="zoneStats(${i})" style="margin-top:8px;width:100%;padding:6px;border:1px solid var(--line);border-radius:6px;background:#fff">구역 분석 (토지 유형·용도지역·소유자·종교/학교)</button>` : ''}
+     ${z.url ? `<a href="${z.url}" target="_blank" rel="noopener" style="display:block;margin-top:4px;font-size:12px">정비사업 정보몽땅 →</a>` : ''}
      <div style="color:#9ca3af;font-size:11px;margin-top:4px">${z.a || ''}${z.loc === '근처' ? ' (근처 지번에 표시 · 경계 미확인)' : ''}</div>`).addTo(map);
   if (innerHeight < 900) map.easeTo({ center: at || f.geometry.coordinates, offset: [0, -innerHeight * 0.32], duration: 300 });  // 팝업이 화면 아래로 잘리지 않게 위로
 }
 function zoneList() {
-  const f = $('zf')?.value ?? '';
-  const L = Z.filter(x => !f || x.properties.s === f).sort((a, b) => b.properties.si - a.properties.si || a.properties.n.localeCompare(b.properties.n));
-  const cnt = STAGES.map(s => [s, Z.filter(x => x.properties.s === s).length]).filter(([, n]) => n);
-  $('panel').innerHTML = `<button class="x" onclick="$('panel').style.display='none'">×</button><h3>정비사업 ${fmt(Z.length)}곳</h3>
+  const f = $('zf')?.value ?? '', fc_ = $('zc')?.value ?? '';
+  const Zc = Z.filter(x => !fc_ || catOf(x.properties) === fc_);
+  const L = Zc.filter(x => !f || x.properties.s === f).sort((a, b) => b.properties.si - a.properties.si || a.properties.n.localeCompare(b.properties.n));
+  const cnt = [...new Set(Zc.map(x => x.properties.s))].map(s => [s, Zc.filter(x => x.properties.s === s).length]).sort((a, b) => b[1] - a[1]);
+  const cats = [...new Set(Z.map(x => catOf(x.properties)))].map(c => [c, Z.filter(x => catOf(x.properties) === c).length]).sort((a, b) => b[1] - a[1]);
+  $('panel').innerHTML = `<button class="x" onclick="$('panel').style.display='none'">×</button><h3>정비사업 ${fmt(L.length)}곳</h3>
+    <select id="zc" style="width:100%;padding:6px;margin-bottom:6px"><option value="">전체 유형</option>
+      ${cats.map(([c, n]) => `<option ${c === fc_ ? 'selected' : ''} value="${c}">${c} (${n})</option>`).join('')}</select>
     <select id="zf" style="width:100%;padding:6px;margin-bottom:6px"><option value="">전체 단계</option>
       ${cnt.map(([s, n]) => `<option ${s === f ? 'selected' : ''} value="${s}">${s} (${n})</option>`).join('')}</select>
     ${L.map((x, i) => `<div class="zi" data-i="${Z.indexOf(x)}"><span class="dot" style="background:${scol(+x.properties.si)}"></span>
-      <b>${x.properties.n}</b> <span style="color:#6b7280">${x.properties.s || ''}</span><br>
+      ${x.properties.c ? `<span style="color:${ccol(x.properties.c)};font-size:11px;font-weight:600">${x.properties.c}</span> ` : ''}<b>${x.properties.n}</b> <span style="color:#6b7280">${x.properties.s || ''}</span><br>
       <span style="color:#6b7280;font-size:12px">${[x.properties.gu, x.properties.t, x.properties.bh ? '계획 ' + fmt(x.properties.bh) + '세대' : '', x.properties.zd ? '지정 ' + x.properties.zd.slice(0, 4) : ''].filter(Boolean).join(' · ')}</span></div>`).join('')}
-    <div class="note">서울시 도시정비사업 통계(분기 갱신) 기준. 아직 수집 안 된 구의 구역은 수집되면 추가됩니다.</div>`;
+    <div class="note">재개발·재건축은 서울시 도시정비사업 통계(분기 갱신), 신통기획·모아타운·가로주택·소규모정비·역세권사업은 서울플랜+ 사업 현황 기준. 경계는 토지이용계획(정비구역·모아타운 관리지역·소규모정비 사업구역·도심 공공주택 복합지구).</div>`;
   $('panel').style.display = 'block';
-  $('zf').onchange = zoneList;
+  $('zf').onchange = zoneList; $('zc').onchange = () => { $('zf').value = ''; zoneList(); };
   $('panel').querySelectorAll('.zi').forEach(el => el.onclick = () => {
     const x = Z[+el.dataset.i];
     map.flyTo({ center: x.geometry.coordinates, zoom: 16 });
@@ -302,7 +331,7 @@ $('done').onclick = async () => {
   renderDraw(true);
   const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
   await load([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
-  showStats([...pts, pts[0]]);
+  showStats([[...pts, pts[0]]]);
 };
 
 function inside(x, y, poly) {
@@ -320,18 +349,25 @@ function areaM2(poly) {
   return Math.abs(a / 2);
 }
 
-function showStats(poly) {
-  const S = P.map(f => f.properties).filter(p => inside(p.cx, p.cy, poly));
+function showStats(rings, title = '선택 구역 분석', note = '') {  // rings: 외곽선 목록 (멀티폴리곤 구역도)
+  const S = P.map(f => f.properties || f).filter(p => rings.some(r => inside(p.cx, p.cy, r)));
   const sum = (k, a = S) => a.reduce((s, p) => s + (p[k] || 0), 0);
-  const nb = sum('nb'), no = sum('no'), nu = sum('nu'), ha = areaM2(poly) / 1e4;
+  const nb = sum('nb'), no = sum('no'), nu = sum('nu'), ha = rings.reduce((s, r) => s + areaM2(r), 0) / 1e4;
   const dae = S.filter(p => p.jm === '대'), small = dae.filter(p => p.ar < SMALL).length;
-  const ar = sum('ar'), pubAr = sum('ar', S.filter(p => p.pub));
+  const ar = sum('ar') || 1, pubAr = sum('ar', S.filter(p => p.pub));
   const lo = sum('ol'), hi = sum('oh'), est = S.filter(p => p.oe).length;
-  const zones = Object.entries(S.reduce((z, p) => (z[p.z || '미상'] = (z[p.z || '미상'] || 0) + p.ar, z), {}))
-    .sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k.replace('지역', '')} ${pct(v / ar)}`).join('<br>');
+  const byArea = (key, def) => Object.entries(S.reduce((z, p) => (z[p[key] || def] = (z[p[key] || def] || 0) + p.ar, z), {})).sort((a, b) => b[1] - a[1]);
+  const bars = (list, tot) => `<table style="font-size:12px;margin:2px 0 8px">${list.map(([k, v]) => `<tr><td>${k}</td>
+      <td style="width:45%"><div style="background:#e5e7eb;border-radius:3px"><div style="width:${Math.max(1, v / tot * 100).toFixed(0)}%;height:8px;background:var(--accent);border-radius:3px"></div></div></td>
+      <td style="width:60px">${pct(v / tot)}</td><td style="width:70px">${fmt(Math.round(v))}㎡</td></tr>`).join('')}</table>`;
+  const zones = byArea('z', '미상').map(([k, v]) => [k.replace('지역', ''), v]);
+  const lts = byArea('lt', '미상');
+  const ots = byArea('ot', '미상'), otKnown = ots.filter(([k]) => k !== '미상').reduce((s, [, v]) => s + v, 0);
+  const rel = S.filter(p => p.lt === '종교'), sch = S.filter(p => p.lt === '학교');
   const r = no / nb, ok = r >= AGING;
   const row = (k, v) => `<tr><td>${k}</td><td>${v}</td></tr>`;
-  $('panel').innerHTML = `<button class="x" onclick="$('panel').style.display='none'">×</button><h3>선택 구역 분석</h3>
+  const h4 = t => `<div style="font-weight:600;margin-top:10px">${t}</div>`;
+  $('panel').innerHTML = `<button class="x" onclick="$('panel').style.display='none'">×</button><h3>${title}</h3>
     <div style="margin-bottom:10px">노후도 <b style="font-size:20px">${pct(r)}</b>
       <span class="badge" style="background:var(--${ok ? 'ok' : 'bad'})">${ok ? '요건 충족' : '요건 미달'} (기준 ${pct(AGING)})</span></div>
     <table>
@@ -347,11 +383,24 @@ function showStats(poly) {
       ${row('현재 세대·가구 / 집합 호수', `${fmt(sum('hh'))} / ${fmt(sum('ho'))}`)}
       ${row('최근 5년 신축', `${fmt(sum('nn'))}동`)}
       ${row('국공유지 면적', pct(pubAr / ar))}
-      ${row('용도지역', zones || '–')}
+      ${row('종교시설', rel.length ? `<b style="color:var(--bad)">${rel.length}필지</b> (${rel.slice(0, 4).map(p => p.j).join(', ')}${rel.length > 4 ? ' …' : ''})` : '없음')}
+      ${row('학교', sch.length ? `<b>${sch.length}필지</b> (${sch.slice(0, 4).map(p => p.j).join(', ')}${sch.length > 4 ? ' …' : ''})` : '없음')}
     </table>
-    <div class="note">소유자 수는 공개 집계 기반 추정치입니다. 한 사람이 여러 필지·호를 가진 경우를 구분하지 못해 실제보다 많게 나올 수 있습니다.
+    ${h4('토지 유형별 면적')}${bars(lts, ar)}
+    ${h4('용도지역별 면적')}${bars(zones, ar)}
+    ${h4('소유자 유형별 면적')}${otKnown > ar * 0.3 ? bars(ots.filter(([k]) => k !== '미상'), otKnown) : '<div class="note">소유자 유형 정보 수집 중 (국공유 여부만 있음)</div>'}
+    <div class="note">${note}토지 유형은 지목(도로·공원·학교용지 등)과 건축물 주용도 기준입니다. 소유자 수는 공개 집계 기반 추정치로, 한 사람이 여러 필지·호를 가진 경우를 구분하지 못해 실제보다 많게 나올 수 있습니다.
       ${est ? `소유정보가 없는 ${est}필지는 집합 호수(또는 1명)로 대체했습니다.` : ''} 정비구역 지정 여부는 고시문으로 확인하세요.</div>`;
   $('panel').style.display = 'block';
+}
+const zoneStats = i => polyStats(ZP.findIndex(f => f.properties.zi === i));
+async function polyStats(pi) {  // 구역 경계(ZP[pi]) 안 필지로 같은 분석
+  const g = ZP[pi]?.geometry, zi = ZP[pi]?.properties.zi;
+  if (!g) return msg('이 구역은 경계가 없어 분석할 수 없습니다'), setTimeout(() => msg(''), 2500);
+  const rings = g.type === 'Polygon' ? [g.coordinates[0]] : g.coordinates.map(c => c[0]);
+  const xs = rings.flat().map(c => c[0]), ys = rings.flat().map(c => c[1]);
+  await load([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
+  showStats(rings, `${zi != null ? Z[zi].properties.n : ZP[pi].properties.n} 구역 분석`, '토지이용계획상 경계 기준 (고시 도면과 다를 수 있음). ');
 }
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>

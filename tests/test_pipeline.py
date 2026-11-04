@@ -138,11 +138,13 @@ def test_zone_polys(tmp_path, monkeypatch):
     w('dongs.json.gz', [dict(type='Feature', geometry=sq(127, 37.5, 0.01), properties=dict(emd_cd='99999101'))])
     pn = lambda i: f'99999101001{i:04d}0000'
     w('9999910100_parcels.json.gz', [dict(type='Feature', geometry=sq(127.001 + i * 0.0003, 37.501), properties=dict(pnu=pn(i))) for i in range(6)])
-    w('9999910100_landuse.json.gz', {'_v': 1, '_c': {'A': '정비구역', 'B': '제2종일반주거지역'},
-                                     **{pn(i): [['B', '1'], ['A', '1']] for i in range(4)}, pn(4): [['B', '1']]})
+    w('9999910100_landuse.json.gz', {'_v': 1, '_c': {'A': '정비구역', 'B': '제2종일반주거지역', 'M': '소규모주택정비 관리지역'},
+                                     **{pn(i): [['B', '1'], ['A', '1']] for i in range(4)}, pn(4): [['B', '1'], ['A', '3']], pn(5): [['M', '1']]})
     P = lambda x: dict(type='Feature', geometry=dict(type='Point', coordinates=[x, 37.50115]), properties=dict(n=f'z{x}', s='추진위', si=1, loc='정확'))
     feats = [P(127.00115), P(127.00205), P(127.1)]
-    polys, rep = redev.zone_polys(feats, redev.Locator())
+    ps = redev.lu_parcels(redev.Locator())
+    assert len(ps['정비']) == 4 and len(ps['모아타운']) == 1                # 접합(3)은 제외
+    polys, rep = redev.zone_polys(feats, ps['정비'])
     assert sorted(rep) == [0, 1] and len(polys) == 2                      # 4필지 덩어리 하나 → 두 구역으로 나뉨, 먼 점은 매칭 안 됨
     assert round(sum(shape_area(p) for p in polys) / (0.0003 ** 2)) == 4
 
@@ -208,3 +210,17 @@ def test_far():
     p = dict(p='x', ar=500, va=150000, pa=60000, vr=0); far(p); assert p['fr'] == 250  # 대지면적으로
     p = dict(p='x', ar=500, va=150000, pa=0, vr=0); far(p); assert 'fr' not in p        # 말이 안 되는 값은 표시 안 함
     p = dict(p='x', ar=200, va=300, pa=0, vr=0); far(p); assert p['fr'] == 150          # 일반 필지
+
+
+def test_plus_si():
+    from pipeline.redev import plus_si
+    assert [plus_si(s) for s in ('대상지선정', '기획완료', '관리지역고시', '조합설립인가 추진중(연번부여)', '조합설립인가', '사업시행계획인가',
+                                  '관리처분계획인가', '착공', '입주', '건축허가')] == [-1, -1, 0, 1, 2, 4, 5, 7, 8, 3]
+
+
+def test_land_owner_type():
+    from pipeline.build import land_type
+    from pipeline.metrics import owner_class
+    assert land_type('도로', '', 0) == '도로' and land_type('대', '공동주택', 3) == '공동주택' and land_type('대', '', 0) == '나대지'
+    assert land_type('대', '제2종근린생활시설', 1) == '근린생활' and land_type('종교용지', '', 0) == '종교' and land_type('대', '교육연구시설', 1) == '학교'
+    assert [owner_class(v) for v in ('개인', '법인', '국유지', '시,도유지', '종중', '종교단체', '외국인', '기타단체')] == ['개인', '법인', '국공유', '국공유', '종중', '종교단체', '개인', '기타']

@@ -26,6 +26,22 @@ KEEP = {'nb', 'ol', 'oh', 'no', 'nn', 'pub'}  # 0이어도 남길 속성 (지도
 
 
 FARLOG, APT = [], []
+LT_JM = {'도로': '도로', '공원': '공원', '학교용지': '학교', '종교용지': '종교', '하천': '하천·구거', '구거': '하천·구거', '주차장': '기타 공공', '철도용지': '기타 공공',
+         '수도용지': '기타 공공', '체육용지': '기타 공공', '유원지': '공원', '임야': '임야·녹지', '전': '임야·녹지', '답': '임야·녹지', '과수원': '임야·녹지'}
+
+
+def land_type(jm, pu, nb):
+    """필지 토지 유형: 지목이 도로·공원·학교 등이면 그것, 건물이 있으면 주용도, 빈 대지는 나대지"""
+    if jm in LT_JM and not (nb and jm in ('전', '답', '임야')): return LT_JM[jm]
+    if nb:
+        if '공동주택' in pu: return '공동주택'
+        if '단독주택' in pu: return '단독주택'
+        if '근린생활' in pu: return '근린생활'
+        if '종교' in pu: return '종교'
+        if '교육연구' in pu: return '학교'
+        if re.search('업무|판매|숙박|위락|문화|운동', pu): return '상업·업무'
+        return '기타 건물'
+    return '나대지' if jm in ('대', '잡종지') else '기타'
 
 
 def far(p):
@@ -62,6 +78,8 @@ def build_dong(sgg, p10, parcels):
         p = dict(p=pnu, j=jb, z=z, **o, **agg_bldgs(bld.get(pnu, [])), cx=round(pt.x, 6), cy=round(pt.y, 6),
                  lu='·'.join(dict.fromkeys(lun[c] + ('(저촉)' if a == '2' else '') for c, a in lu.get(pnu, []) if c in lun)))
         if p['ol'] is None: p['ol'] = p['oh'] = 0 if p['pub'] else max(p['ho'], 1); p['oe'] = 1  # 소유정보 없음 → 호수 또는 1인
+        p['lt'] = land_type(p.get('jm') or '', p.pop('pu', '') or '', p.get('nb'))
+        if 'ot' not in p and p.get('pub'): p['ot'] = '국공유'
         p['ar'] = round(m2(g), 1)  # 필지 면적은 도형으로: 소유정보의 면적(lndpclAr)은 공동주택·공유 필지에서 대지권 지분 면적이 와서 작게 나옴 (약 20%)
         far(p)
         feats.append(dict(type='Feature', geometry=snap(g), properties={k: v for k, v in p.items() if v not in (None, '', 0) or k in KEEP}))

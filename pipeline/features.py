@@ -102,8 +102,19 @@ def features(P, g, ref, sgg=None):
         **{f'{k}_km': dist_m((c.x, c.y), v) / 1000 for k, v in LANDMARK.items()},
         apt_gu=m_gu.get('m'), apt_gu_new=m_gu.get('mn'),
         seoul=int(sg.startswith('11')), sgg=sg, cx=round(c.x, 6), cy=round(c.y, 6))
+    sh = lambda key, vals: sum(p.get('ar', 0) for p in ps if p.get(key) in vals) / ar  # 면적 비율
+    for k, v in LT_VARS.items(): f[k] = sh('lt', v)
+    known = sh('ot', OT_ALL)
+    for k, v in OT_VARS.items(): f[k] = sh('ot', v) / known if known > 0.3 else None  # 소유자 유형은 소유정보가 있는 면적 기준 (v3 수집 전엔 대부분 없음)
+    f['n_relig'] = sum(1 for p in ps if p.get('lt') == '종교'); f['n_school'] = sum(1 for p in ps if p.get('lt') == '학교')
     if f['apt_gu_new'] and f['gj_med']: f['price_gap'] = f['apt_gu_new'] * 1e4 / f['gj_med']  # 신축 아파트 ㎡가 / 공시지가 ㎡가 → 사업성 근사
     return {k: (round(v, 4) if isinstance(v, float) else v) for k, v in f.items()}
+
+
+LT_VARS = dict(lt_apt={'공동주택'}, lt_house={'단독주택'}, lt_nbhd={'근린생활'}, lt_comm={'상업·업무'}, lt_relig={'종교'}, lt_school={'학교'},
+               lt_road={'도로'}, lt_park={'공원'}, lt_vacant={'나대지'})  # 토지 유형별 면적 비율 (build.land_type)
+OT_VARS = dict(ow_ind={'개인'}, ow_corp={'법인'}, ow_pub={'국공유'}, ow_clan={'종중', '종교단체'})  # 소유자 유형별 면적 비율
+OT_ALL = {'개인', '법인', '국공유', '종중', '종교단체', '기타'}
 
 
 def circle(x, y, area_m2):  # 면적이 같은 원 (위경도 비율 보정)
@@ -141,6 +152,7 @@ def main():
     rows = []
     for i, z in enumerate(zs):
         pr = z['properties']
+        if pr.get('c'): continue  # 서울플랜+에서 덧붙인 사업(신통기획·모아타운 등)은 모델 대상 아님
         ref = int((pr.get('zd') or pr.get('cm') or pr.get('jo') or '2026')[:4])
         ref = min(max(ref, 2006), 2026)
         meta = {k: pr.get(k) for k in ('t', 's', 'si', 'pp', 'gp', 'eh', 'bh', 'zd', 'cm', 'jo', 'sa', 'gc', 'ij', 'cs')}
