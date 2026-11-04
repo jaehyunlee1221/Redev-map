@@ -38,7 +38,7 @@ def far(p):
     fr = vr or (round(p['va'] / den * 100) if den else None)
     if fr and fr > 1500 and not vr: fr = None  # 계산값만 상한 (대장에 적힌 용적률은 도심 고층이면 1,500% 넘기도 함)
     if fr: p['fr'] = fr
-    if p.get('ho', 0) >= 50: APT.append(fr)  # 공동주택 필지 확인용
+    if p.get('ho', 0) >= 50: APT.append((fr, 'v' if vr else 'c', p['p'], p.get('j'), p.get('va'), p.get('ar'), pa, vr, p.get('nb'), p.get('ho')))  # 공동주택 필지 확인용
     if old and old > 1500 and len(FARLOG) < 2000: FARLOG.append((p['p'], p.get('j'), old, fr, vr, pa, p.get('ar'), p.get('nb')))
 
 
@@ -100,8 +100,10 @@ def main(arg):
         dump(OUT / 'redev.geojson', rd('', 'redev.json'))
     dump(path, list(dongs.values()))
     if APT:
-        v = sorted(x for x in APT if x)
-        print(f'공동주택(50호+) 필지 {len(APT)}개: 용적률 있음 {len(v)} · 중위 {v[len(v) // 2] if v else None}% · 90% {v[int(len(v) * .9)] if v else None}% · 최대 {v[-1] if v else None}%', flush=True)
+        for src in ('v', 'c'):
+            v = sorted(x[0] for x in APT if x[0] and x[1] == src)
+            if v: print(f'공동주택(50호+) 필지 [{"대장 용적률" if src == "v" else "계산"}] {len(v)}개: 중위 {v[len(v) // 2]}% · 90% {v[int(len(v) * .9)]}% · 최대 {v[-1]}%', flush=True)
+        for x in sorted((x for x in APT if x[0] and x[0] > 600), key=lambda x: -x[0])[::40][:15]: print('  (용적률, 출처, pnu, 지번, 연면적, 필지, 대장대지, 대장용적률, 동, 호)', x, flush=True)
     if FARLOG:  # 용적률 보정 확인용
         print(f'용적률 보정: 필지 면적 기준 1,500% 넘던 필지 {len(FARLOG)}개 → 대장 용적률 사용 {sum(1 for x in FARLOG if x[4])} · 대지면적으로 계산 '
               f'{sum(1 for x in FARLOG if x[3] and not x[4])} · 표시 안 함 {sum(1 for x in FARLOG if not x[3])}', flush=True)
