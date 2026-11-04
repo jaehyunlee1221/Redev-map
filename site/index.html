@@ -253,12 +253,12 @@ function farLine(p) {
 
 // ---------- 정비사업 ----------
 const GCOL = ['#16a34a', '#65a30d', '#ca8a04', '#ea580c', '#dc2626'], GNM = ['낮음', '다소 낮음', '보통', '다소 높음', '높음'];
-function riskHtml(i) {  // 해제위험 등급 + SHAP 사유 (사업시행 전 단계만)
+function riskHtml(i) {  // 해제위험 등급 + SHAP 사유 (구역지정~조합설립 단계만)
   const r = ZS && ZS.z[i];
   if (!r) return '';
   const m = ZS.meta, li = (a, c) => a.map(x => `<li style="color:${c}">${x}</li>`).join('');
   return `<div style="margin-top:8px;padding:6px 8px;border-radius:6px;background:#f9fafb;border-left:4px solid ${GCOL[r.g - 1]}">
-    해제위험 <b style="color:${GCOL[r.g - 1]}">${r.g}등급 · ${GNM[r.g - 1]}</b> <span style="color:#6b7280;font-size:11px">(사업시행 전 ${m.n_scored}개 중 상위 ${Math.round((1 - r.p) * 100)}%)</span>
+    해제위험 <b style="color:${GCOL[r.g - 1]}">${r.g}등급 · ${GNM[r.g - 1]}</b> <span style="color:#6b7280;font-size:11px">(조합설립 이전 ${m.n_scored}개 중 상위 ${Math.round((1 - r.p) * 100)}%)</span>
     ${r.up.length ? `<div style="font-size:12px;margin-top:3px">위험↑</div><ul style="margin:0;padding-left:16px;font-size:12px">${li(r.up, '#b91c1c')}</ul>` : ''}
     ${r.dn.length ? `<div style="font-size:12px;margin-top:3px">위험↓</div><ul style="margin:0;padding-left:16px;font-size:12px">${li(r.dn, '#15803d')}</ul>` : ''}
     <div style="color:#9ca3af;font-size:10px;margin-top:3px">${m.model} · ${m.target} · 해제 ${m.n_bad}/도달 ${m.n_good}개 학습 · AUC ${m.auc}. 상대 등급이며 확률 아님</div></div>`;

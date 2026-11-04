@@ -1,7 +1,7 @@
 """정비사업 성공가능성 모델 (로컬 분석용) — PD 모델처럼: 관측시점 = 구역지정, good = 단계 도달, bad = 해제
   입력: zone_features.json (pipeline.features 결과; GitHub 로그의 FEATDUMP를 풀어 저장)
   모든 구역은 같은 방식(대표 지번 + 같은 면적의 원)으로 계산한 행만 씀 → 측정 방식 차이 편향 방지
-  A) 사업시행인가 도달 vs 해제   — good: 진행 목록 중 사업시행~이주 (착공 전 → 옛 건물이 남아 있어 변수 전부 사용)
+  A) 사업시행 단계 도달 vs 해제 — good: 건축심의~사업시행 (이주·철거 전 → 옛 건물이 남아 있어 변수 전부 사용) ← 지도 등급(pipeline.score)
   B) 관리처분인가 도달 vs 해제   — good: 관리처분~이주
   C) 완료 포함, 시간불변 변수만  — good: 사업시행 이상 전부 + 완료 추정(그 자리에 지정 뒤 100세대+ 신축 확인)
   지정 2003~2015 코호트, 5겹 교차검증 AUC·AR·KS, 로지스틱(표준화·L2) 계수, LightGBM(소표본 튜닝) 비교
@@ -57,12 +57,12 @@ def main(path, out=None):
     act = coh[coh.kind == 'active_c']
     done = coh[(coh.kind == 'done') & (coh.post_hh.fillna(0) >= 100)]
     print(f"코호트(지정 2003~2015): 해제 {len(bad)} · 진행 {len(act)} (단계 {act.s.value_counts().to_dict()}) · 완료추정 {len(coh[coh.kind == 'done'])} 중 신축 확인 {len(done)}")
-    A = pd.concat([bad, act[act.si.between(4, 6)].assign(y=0)])
+    A = pd.concat([bad, act[act.si.between(3, 4)].assign(y=0)])  # 건축심의~사업시행: 이주·철거 전 (관리처분 이후는 멸실로 변수가 변해 누수)
     B = pd.concat([bad, act[act.si.between(5, 6)].assign(y=0)])
     C = pd.concat([bad, act[act.si >= 4].assign(y=0), done.assign(y=0)])
     res = {}
-    mA, res['A'], cA = fit('A) 사업시행 도달 vs 해제 (전체 변수)', A, FULL)
-    _, res['B'], _ = fit('B) 관리처분 도달 vs 해제 (전체 변수)', B, FULL)
+    mA, res['A'], cA = fit('A) 사업시행 단계 도달(철거 전) vs 해제 (전체 변수) ← 지도 등급', A, FULL)
+    _, res['B'], _ = fit('B) 관리처분 도달 vs 해제 (전체 변수, 이주 중 멸실 누수 주의)', B, FULL)
     _, res['C'], _ = fit('C) 사업시행 이상·완료 vs 해제 (시간불변 변수만)', C, FIXED)
     allact = d[d.kind == 'active_c'].copy()
     allact['risk'] = mA.predict_proba(allact[usable(A, FULL)].astype(float))[:, 1]

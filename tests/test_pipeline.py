@@ -192,7 +192,7 @@ def test_score(tmp_path, monkeypatch):
         k = 'released' if i < 120 else 'active_c'
         r = {c: random.random() for c in cols}
         r.update(kind=k, id=i, ref=2008, n_bldg=20, area_ha=2, gj_med=3e6, cx=127, cy=37.5, post_hh=0, t='재개발', ty='주택정비형',
-                 s='관리처분' if i < 200 else '조합설립')
+                 s='사업시행' if i < 200 else '조합설립')
         if k == 'released': r['owners_per_ha'] += 1
         rows.append(r)
     monkeypatch.setattr(score, 'RAW', tmp_path); monkeypatch.setattr(score, 'OUT', tmp_path)
