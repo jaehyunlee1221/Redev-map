@@ -25,6 +25,22 @@ LU_SHOW = re.compile(r'정비|촉진|지구단위|고도지구|경관지구|역�
 KEEP = {'nb', 'ol', 'oh', 'no', 'nn', 'pub'}  # 0이어도 남길 속성 (지도 색칠에 씀)
 
 
+FARLOG = []
+
+
+def far(p):
+    """현재 용적률(%) → p['fr']. 아파트 단지는 건물 전부가 대표 지번 한 필지에 등록돼 필지 면적으로 나누면 수만 %가 됨
+    → 대장에 적힌 용적률(vlRat) 우선, 없으면 연면적 ÷ max(필지 면적, 대장상 대지면적), 그래도 1,500% 넘으면 표시 안 함"""
+    pa, vr = p.pop('pa', 0), p.pop('vr', 0)
+    if not p.get('va'): return
+    den = max(p.get('ar') or 0, pa or 0)
+    old = round(p['va'] / p['ar'] * 100) if p.get('ar') else None
+    fr = vr or (round(p['va'] / den * 100) if den else None)
+    if fr and fr > 1500: fr = None
+    if fr: p['fr'] = fr
+    if old and old > 1500 and len(FARLOG) < 2000: FARLOG.append((p['p'], p.get('j'), old, fr, vr, pa, p.get('ar'), p.get('nb')))
+
+
 def build_dong(sgg, p10, parcels):
     zs = [(shape(f['geometry']), f['properties'].get('uname', '')) for f in rd(sgg, f'{p10}_zones.json') or []]
     tree = STRtree([g for g, _ in zs])
@@ -45,7 +61,7 @@ def build_dong(sgg, p10, parcels):
         p = dict(p=pnu, j=jb, z=z, **o, **agg_bldgs(bld.get(pnu, [])), cx=round(pt.x, 6), cy=round(pt.y, 6),
                  lu='·'.join(dict.fromkeys(lun[c] + ('(저촉)' if a == '2' else '') for c, a in lu.get(pnu, []) if c in lun)))
         if p['ol'] is None: p['ol'] = p['oh'] = 0 if p['pub'] else max(p['ho'], 1); p['oe'] = 1  # 소유정보 없음 → 호수 또는 1인
-        if p['ar'] and p['va']: p['fr'] = round(p['va'] / p['ar'] * 100)  # 현재 용적률(%)
+        far(p)
         feats.append(dict(type='Feature', geometry=snap(g), properties={k: v for k, v in p.items() if v not in (None, '', 0) or k in KEEP}))
     (OUT / 'p').mkdir(exist_ok=True)  # 구역 그리기 통계용: 속성만 (지도 표시는 벡터타일)
     (OUT / 'p' / f'{p10}.json').write_text(json.dumps([f['properties'] for f in feats], ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
@@ -81,6 +97,10 @@ def main(arg):
     if (SEED / 'redev.json.gz').exists():  # 건축규제 구역 오버레이 (UD210)
         dump(OUT / 'redev.geojson', rd('', 'redev.json'))
     dump(path, list(dongs.values()))
+    if FARLOG:  # 용적률 보정 확인용
+        print(f'용적률 보정: 필지 면적 기준 1,500% 넘던 필지 {len(FARLOG)}개 → 대장 용적률 사용 {sum(1 for x in FARLOG if x[4])} · 대지면적으로 계산 '
+              f'{sum(1 for x in FARLOG if x[3] and not x[4])} · 표시 안 함 {sum(1 for x in FARLOG if not x[3])}', flush=True)
+        for x in FARLOG[:12]: print('  (pnu, 지번, 이전%, 보정%, 대장용적률, 대장대지, 필지면적, 동수)', x, flush=True)
     import time  # 데이터 버전: 바뀌면 브라우저가 캐시를 버리고 새로 받음
     (OUT / 'version.json').write_text(json.dumps(dict(v=os.environ.get('GITHUB_RUN_ID') or str(int(time.time())))), encoding='utf-8')
 

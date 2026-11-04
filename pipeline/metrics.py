@@ -40,7 +40,9 @@ def agg_bldgs(bs):  # 주건축물만
                 oa=round(sum(num(b.get('totArea')) for b, o in zip(m, old) if o)),
                 ho=sum(int(num(b.get('hoCnt'))) for b in m if '집합' in (b.get('regstrGbCdNm') or '')),
                 hh=sum(int(num(b.get('hhldCnt')) + num(b.get('fmlyCnt'))) for b in m),
-                y0=min(ys, default=None), y1=max(ys, default=None))
+                y0=min(ys, default=None), y1=max(ys, default=None),
+                pa=round(max((num(b.get('platArea')) for b in m), default=0)),  # 대장상 대지면적 (아파트 단지는 여러 필지 합)
+                vr=round(max((v for v in (num(b.get('vlRat')) for b in m) if 0 < v < 2000), default=0)))  # 대장에 적힌 용적률
 
 
 UNIT = ('agbldgSn', 'buldDongNm', 'buldFloorNm', 'buldHoNm', 'buldRoomNm')

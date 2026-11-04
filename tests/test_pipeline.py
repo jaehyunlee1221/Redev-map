@@ -200,3 +200,11 @@ def test_score(tmp_path, monkeypatch):
     assert z['meta']['n_bad'] == 120 and len(z['z']) == 60  # 조합설립 단계만 점수
     v = next(iter(z['z'].values()))
     assert 1 <= v['g'] <= 5 and isinstance(v['up'], list)
+
+
+def test_far():
+    from pipeline.build import far
+    p = dict(p='x', ar=500, va=150000, pa=40000, vr=249); far(p); assert p['fr'] == 249 and 'pa' not in p  # 아파트: 대장 용적률
+    p = dict(p='x', ar=500, va=150000, pa=60000, vr=0); far(p); assert p['fr'] == 250  # 대지면적으로
+    p = dict(p='x', ar=500, va=150000, pa=0, vr=0); far(p); assert 'fr' not in p        # 말이 안 되는 값은 표시 안 함
+    p = dict(p='x', ar=200, va=300, pa=0, vr=0); far(p); assert p['fr'] == 150          # 일반 필지
