@@ -89,7 +89,8 @@ def main():
                                    up=why([j for j in o if s[j] > 0.05]), dn=why([j for j in o[::-1] if s[j] < -0.05]))
     meta = dict(model='LightGBM', target='사업시행 단계 도달 vs 해제 (지정 2003~2015)', n_bad=int(y.sum()), n_good=int((1 - y).sum()),
                 auc=round(float(cv.mean()), 3), auc_sd=round(float(cv.std()), 3), n_scored=len(out))
-    (OUT / 'zscore.json').write_text(json.dumps(dict(meta=meta, z=out), ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    own = {str(int(r.id)): [int(r.owners or 0), int(r.owners_hi or 0)] for r in d[d.kind == 'active'].itertuples() if r.owners}  # 경계 안 추정 토지등소유자 (팝업: 분양분과 비교)
+    (OUT / 'zscore.json').write_text(json.dumps(dict(meta=meta, z=out, own=own), ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     print(f"해제위험 등급 {len(out)}개 구역 · 학습 해제 {meta['n_bad']} vs 사업시행 도달 {meta['n_good']} · CV AUC {meta['auc']} ± {meta['auc_sd']}", flush=True)
     imp = pd.Series(np.abs(m.predict(X, pred_contrib=True)[:, :-1]).mean(0), index=cols).sort_values(ascending=False)
     print('  SHAP 평균 영향 상위:', ', '.join(f'{LABEL[k][0]} {v:.2f}' for k, v in imp.head(8).items()), flush=True)

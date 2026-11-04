@@ -266,7 +266,10 @@ function riskHtml(i) {  // 해제위험 등급 + SHAP 사유 (구역지정~조�
 }
 function zonePopup(f, at) {
   const z = f.properties, si = +z.si;
-  const hh = z.bh ? `기존 ${fmt(z.eh)}세대 → <b>계획 ${fmt(z.bh)}세대</b>${z.sh || z.rh ? ` (분양 ${fmt(z.sh)} · 임대 ${fmt(z.rh)})` : ''}` : z.eh ? `기존 ${fmt(z.eh)}세대` : '';
+  const ow = ZS?.own?.[Z.indexOf(f)];
+  const hh = (z.bh ? `기존 거주 ${fmt(z.eh)}세대 → <b>계획 ${fmt(z.bh)}세대</b>${z.eh ? ` (${Math.round(z.bh / z.eh * 100)}%)` : ''}${z.sh || z.rh ? `<br>분양 ${fmt(z.sh)} · 임대 ${fmt(z.rh)}` : ''}` : z.eh ? `기존 거주 ${fmt(z.eh)}세대` : '')
+    + (z.bh && z.eh && z.bh < z.eh ? `<div style="color:#92400e;font-size:11px">기존 세대는 세입자 포함 거주 가구 수라, 다가구·쪽방이 밀집했거나 높이·경관 제한(예: 남산 고도지구)·큰 평형 위주면 새로 짓는 세대가 더 적을 수 있음</div>` : '')
+    + (ow && z.sh ? `<div style="font-size:12px">추정 토지등소유자 ${ow[0] === ow[1] ? fmt(ow[0]) : fmt(ow[0]) + '~' + fmt(ow[1])}명 vs 분양 ${fmt(z.sh)}세대${z.sh < ow[0] ? ' <b style="color:var(--bad)">· 분양분이 추정 소유자보다 적음 (추정치 · 현금청산 많거나 1+1 제한 가능)</b>' : ''}</div>` : '');
   const tr = (l, v) => `<tr><td>${l}</td><td style="text-align:right">${v}</td></tr>`;
   const ds = DLAB.filter(([k]) => z[k]).map(([k, l]) => tr(l, z[k])).join('')
     + (z.pd ? tr(`${z.s} (서울플랜+)`, z.pd) : '') + (z.st ? tr('신속통합기획', z.st) : '')
