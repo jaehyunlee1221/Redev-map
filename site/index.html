@@ -27,7 +27,7 @@
   .badge { display:inline-block; padding:2px 8px; border-radius:99px; color:#fff; font-size:12px; }
   .note { color:var(--muted); font-size:12px; margin-top:8px; }
   #msg { position:absolute; top:58px; left:50%; transform:translateX(-50%); background:#111c; color:#fff; padding:6px 12px; border-radius:99px; font-size:13px; z-index:2; display:none; }
-  .maplibregl-popup-content { font-size:13px; line-height:1.5; }
+  .maplibregl-popup-content { font-size:13px; line-height:1.5; max-height:58vh; overflow-y:auto; }
   .steps { display:flex; gap:2px; margin:6px 0 2px; } .steps span { flex:1; height:6px; border-radius:3px; background:#e5e7eb; }
   .stepn { display:flex; justify-content:space-between; font-size:10px; color:var(--muted); }
   .zi { padding:7px 4px; border-bottom:1px solid var(--line); cursor:pointer; } .zi:hover { background:#f3f4f6; }
@@ -123,6 +123,7 @@ map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAc
 map.addControl(new maplibregl.ScaleControl(), 'bottom-right');
 
 // 정비사업 단계 (서울시 도시정비사업 통계 기준)
+let ZS = null;  // 해제위험 등급 (zscore.json)
 const STAGES = ['구역지정', '추진위', '조합설립', '건축심의', '사업시행', '관리처분', '이주', '착공', '준공'];
 const SCOL = ['#fcd34d', '#fb923c', '#f97316', '#ea580c', '#dc2626', '#be123c', '#9d174d', '#6d28d9', '#374151'];
 const scol = i => SCOL[i] ?? '#9ca3af';
@@ -178,6 +179,7 @@ map.on('style.load', async () => {
   } catch (e) {}
   try {  // 정비사업 구역 (대표 지번 위치)
     Z = (await (await fetch(D('zones.geojson'))).json()).features;
+    try { ZS = await (await fetch(D('zscore.json'))).json(); } catch (e) {}  // 해제위험 등급 (모델)
     map.addSource('zones', { type: 'geojson', data: fc(Z) });
     map.addLayer({ id: 'z-pt', type: 'circle', source: 'zones', paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 5, 15, 9],
@@ -233,6 +235,17 @@ function farLine(p) {
 }
 
 // ---------- 정비사업 ----------
+const GCOL = ['#16a34a', '#65a30d', '#ca8a04', '#ea580c', '#dc2626'], GNM = ['낮음', '다소 낮음', '보통', '다소 높음', '높음'];
+function riskHtml(i) {  // 해제위험 등급 + SHAP 사유 (사업시행 전 단계만)
+  const r = ZS && ZS.z[i];
+  if (!r) return '';
+  const m = ZS.meta, li = (a, c) => a.map(x => `<li style="color:${c}">${x}</li>`).join('');
+  return `<div style="margin-top:8px;padding:6px 8px;border-radius:6px;background:#f9fafb;border-left:4px solid ${GCOL[r.g - 1]}">
+    해제위험 <b style="color:${GCOL[r.g - 1]}">${r.g}등급 · ${GNM[r.g - 1]}</b> <span style="color:#6b7280;font-size:11px">(사업시행 전 ${m.n_scored}개 중 상위 ${Math.round((1 - r.p) * 100)}%)</span>
+    ${r.up.length ? `<div style="font-size:12px;margin-top:3px">위험↑</div><ul style="margin:0;padding-left:16px;font-size:12px">${li(r.up, '#b91c1c')}</ul>` : ''}
+    ${r.dn.length ? `<div style="font-size:12px;margin-top:3px">위험↓</div><ul style="margin:0;padding-left:16px;font-size:12px">${li(r.dn, '#15803d')}</ul>` : ''}
+    <div style="color:#9ca3af;font-size:10px;margin-top:3px">${m.model} · ${m.target} · 해제 ${m.n_bad}/도달 ${m.n_good}개 학습 · AUC ${m.auc}. 상대 등급이며 확률 아님</div></div>`;
+}
 function zonePopup(f, at) {
   const z = f.properties, si = +z.si;
   const hh = z.bh ? `기존 ${fmt(z.eh)}세대 → <b>계획 ${fmt(z.bh)}세대</b>${z.sh || z.rh ? ` (분양 ${fmt(z.sh)} · 임대 ${fmt(z.rh)})` : ''}` : z.eh ? `기존 ${fmt(z.eh)}세대` : '';
@@ -245,7 +258,9 @@ function zonePopup(f, at) {
      <div class="stepn"><span>구역지정</span><span>조합</span><span>사업시행</span><span>관리처분</span><span>착공</span></div>
      ${hh ? `<div style="margin-top:6px">${hh}</div>` : ''}
      ${ds ? `<table style="width:100%;margin-top:6px;font-size:12px">${ds}</table>` : ''}
+     ${riskHtml(Z.indexOf(f))}
      <div style="color:#9ca3af;font-size:11px;margin-top:4px">${z.a || ''}${z.loc === '근처' ? ' (근처 지번에 표시 · 경계 미확인)' : ''}</div>`).addTo(map);
+  if (innerHeight < 900) map.easeTo({ center: at || f.geometry.coordinates, offset: [0, -innerHeight * 0.32], duration: 300 });  // 팝업이 화면 아래로 잘리지 않게 위로
 }
 function zoneList() {
   const f = $('zf')?.value ?? '';

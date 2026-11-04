@@ -4,41 +4,25 @@
   A) 사업시행인가 도달 vs 해제   — good: 진행 목록 중 사업시행~이주 (착공 전 → 옛 건물이 남아 있어 변수 전부 사용)
   B) 관리처분인가 도달 vs 해제   — good: 관리처분~이주
   C) 완료 포함, 시간불변 변수만  — good: 사업시행 이상 전부 + 완료 추정(그 자리에 지정 뒤 100세대+ 신축 확인)
-  지정 2003~2015 코호트, 5겹 교차검증 AUC·AR·KS, 로지스틱(표준화·L2) 계수, GBM 비교
+  지정 2003~2015 코호트, 5겹 교차검증 AUC·AR·KS, 로지스틱(표준화·L2) 계수, LightGBM(소표본 튜닝) 비교
   python tools/model.py zone_features.json [scores.json]"""
 import sys, json
 import numpy as np, pandas as pd
 from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 from sklearn.model_selection import StratifiedKFold, cross_val_predict
 from sklearn.metrics import roc_auc_score
 
-FULL = ['old_ratio', 'age_mean', 'bldg_per_ha', 'hh_per_ha', 'owners_per_ha', 'jiphap_ratio', 'new5_before_ref', 'small_ratio', 'dae_ratio',
-        'road_ratio', 'pub_ratio', 'far_room', 'far_now', 'z1', 'z2', 'z3', 'zcom', 'lu_heritage', 'log_area', 'log_gj',
-        'station_m', 'cityhall_km', 'gangnam_km', 'yeouido_km', 'apt_gu', 'price_gap', 'k_rebuild', 'k_dosi']
-FIXED = ['log_area', 'station_m', 'cityhall_km', 'gangnam_km', 'yeouido_km', 'apt_gu', 'apt_gu_new', 'k_rebuild', 'k_dosi', 'seoul_ne', 'seoul_sw']
-STAGE = {'구역지정': 0, '추진위': 1, '조합설립': 2, '건축심의': 3, '사업시행': 4, '관리처분': 5, '이주': 6, '착공': 7, '준공': 8}
+sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parents[1]))
+from pipeline.score import FULL, FIXED, STAGE, PARAMS, load  # 변수 목록·전처리는 지도 등급(pipeline.score)과 공유
+from lightgbm import LGBMClassifier
 
 
 def ks(y, p):
     o = np.argsort(p); y = np.asarray(y)[o]
     return float(np.max(np.abs(np.cumsum(y) / y.sum() - np.cumsum(1 - y) / (1 - y).sum())))
-
-
-def load(path):
-    d = pd.DataFrame(json.load(open(path, encoding='utf-8')))
-    d['log_area'] = np.log(d['area_ha'].clip(lower=0.1))
-    d['log_gj'] = np.log(d['gj_med'].where(d['gj_med'] > 0))
-    d['si'] = d['s'].map(STAGE) if 's' in d else np.nan
-    tt = d['ty'].astype(str) if 'ty' in d else d['t'].astype(str)  # features.ty: 출처와 무관하게 같은 기준의 유형
-    d['k_rebuild'] = (tt == '재건축').astype(int)
-    d['k_dosi'] = (tt == '도시정비형').astype(int)
-    d['seoul_ne'] = ((d.cx > 127.0) & (d.cy > 37.57)).astype(int)   # 동북권 대략
-    d['seoul_sw'] = ((d.cx < 126.95) & (d.cy < 37.53)).astype(int)  # 서남권 대략
-    return d
 
 
 def fit(name, tr, cols):
@@ -47,9 +31,9 @@ def fit(name, tr, cols):
     print(f'\n=== {name}: good {int((1 - y).sum())} vs bad(해제) {int(y.sum())}')
     cv = StratifiedKFold(5, shuffle=True, random_state=0)
     lr = make_pipeline(SimpleImputer(strategy='median'), StandardScaler(), LogisticRegression(C=0.3, max_iter=3000))
-    gb = make_pipeline(SimpleImputer(strategy='median'), HistGradientBoostingClassifier(max_depth=3, learning_rate=0.05, max_iter=200, min_samples_leaf=15))
+    gb = LGBMClassifier(**PARAMS)
     res = {}
-    for nm, m in (('logistic', lr), ('gbm', gb)):
+    for nm, m in (('logistic', lr), ('lightgbm', gb)):
         p = cross_val_predict(m, X, y, cv=cv, method='predict_proba')[:, 1]
         auc = roc_auc_score(y, p); res[nm] = dict(auc=round(auc, 3), ar=round(2 * auc - 1, 3), ks=round(ks(y, p), 3))
         print(f'  {nm:9s} CV AUC {auc:.3f} · AR {2 * auc - 1:.3f} · KS {ks(y, p):.3f}')

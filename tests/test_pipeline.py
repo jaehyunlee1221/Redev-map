@@ -178,3 +178,25 @@ def test_locator_split():
     assert L.split(None, '성동구 성수1가1동 72-10번지') == ('성동구', '1120011400', False, 72, 10)
     assert L.split(None, '서대문구 북가좌동 340-30번지 일대') == ('서대문구', '1141012000', False, 340, 30)
     assert L.split('동작구', '상도4동 산 65번지 일대') == ('동작구', '1159010200', True, 65, 0)
+
+
+def test_score(tmp_path, monkeypatch):
+    import json, random
+    from pipeline import score
+    random.seed(0)
+    cols = [c for c in score.FULL if c not in ('log_area', 'log_gj', 'k_rebuild', 'k_dosi')]
+    rows = []
+    for i in range(260):
+        k = 'released' if i < 120 else 'active_c'
+        r = {c: random.random() for c in cols}
+        r.update(kind=k, id=i, ref=2008, n_bldg=20, area_ha=2, gj_med=3e6, cx=127, cy=37.5, post_hh=0, t='재개발', ty='주택정비형',
+                 s='관리처분' if i < 200 else '조합설립')
+        if k == 'released': r['owners_per_ha'] += 1
+        rows.append(r)
+    monkeypatch.setattr(score, 'RAW', tmp_path); monkeypatch.setattr(score, 'OUT', tmp_path)
+    (tmp_path / 'zone_features.json').write_text(json.dumps(rows))
+    score.main()
+    z = json.loads((tmp_path / 'zscore.json').read_text())
+    assert z['meta']['n_bad'] == 120 and len(z['z']) == 60  # 조합설립 단계만 점수
+    v = next(iter(z['z'].values()))
+    assert 1 <= v['g'] <= 5 and isinstance(v['up'], list)

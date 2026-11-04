@@ -5,3 +5,6 @@ pytest
 pyshp
 pyproj
 numpy
+pandas
+scikit-learn
+lightgbm
