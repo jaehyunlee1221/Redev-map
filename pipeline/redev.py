@@ -277,6 +277,19 @@ def main():
             else: f['properties']['c'] = KIND_LABEL[kd]
         polys += pp
         print(f'  {KIND_LABEL[kd]} 경계 {len(pp)}개 (사업과 매칭 {len(rp)}개)', flush=True)
+    # 경계가 없는 사업(신통 대상지·초기 구역 등): 면적을 알면 같은 면적의 원을 '추정 범위'로 (approx=1, 지도에 점선·연하게)
+    from .features import circle
+    has = {f['properties']['zi'] for f in polys if 'zi' in f['properties']}
+    areas, napx = zone_areas(), 0
+    for i, f in enumerate(feats):
+        pr = f['properties']
+        a = pr.get('ba') or (areas.get(norm(pr.get('n'))) if i < n0 else None)
+        if i in has or not a or (pr.get('si', -1) >= 7): continue  # 착공 이후는 이미 공사장
+        g = circle(*f['geometry']['coordinates'], a)
+        polys.append(dict(type='Feature', geometry=mapping(set_precision(g, 1e-6)),
+                          properties={**{k: pr[k] for k in ('n', 's', 'si', 'gu', 't', 'c') if k in pr}, 'zi': i, 'approx': 1}))
+        napx += 1
+    print(f'  경계 없는 사업 {napx}곳은 면적 기준 추정 원으로 표시', flush=True)
     (OUT / 'zonepoly.geojson').write_text(json.dumps(dict(type='FeatureCollection', features=polys), ensure_ascii=False,
                                                       separators=(',', ':')), encoding='utf-8')
     (OUT / 'zones.geojson').write_text(json.dumps(dict(type='FeatureCollection', features=feats), ensure_ascii=False,

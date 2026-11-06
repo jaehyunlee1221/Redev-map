@@ -201,7 +201,7 @@ map.on('style.load', async () => {
     const lc = ['case', ['has', 'c'], ['match', ['get', 'c'], ...Object.entries(CCOL).flat(), '#6b7280'], zc];  // 소규모·모아타운 등은 유형 색
     map.addLayer({ id: 'zp-fill', type: 'fill', source: 'zpoly', paint: { 'fill-color': zc, 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0.35, 15, 0.12] } });
     map.addLayer({ id: 'zp-line', type: 'line', source: 'zpoly', paint: { 'line-color': lc, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.2, 16, 3],
-      'line-dasharray': ['case', ['has', 'c'], ['literal', [2, 1]], ['literal', [1, 0]]] } });
+      'line-dasharray': ['case', ['has', 'approx'], ['literal', [0.6, 1.4]], ['has', 'c'], ['literal', [2, 1]], ['literal', [1, 0]]] } });
   } catch (e) {}
   try {  // 정비사업 구역 (대표 지번 위치)
     Z = (await (await fetch(D('zones.geojson'))).json()).features;
@@ -290,7 +290,11 @@ function riskHtml(i) {  // 진행 가능성 등급 + SHAP 사유 (구역지정~�
     ${c ? '<div style="color:#92400e;font-size:11px">정비구역 지정 전 후보 — 지정된다고 보고 계산한 참고치 (신통 자체의 선정·철회 이력은 학습에 없음)</div>' : ''}
     ${r.dn.length ? `<div style="font-size:12px;margin-top:3px">유리한 점</div><ul style="margin:0;padding-left:16px;font-size:12px">${li(r.dn, '#15803d')}</ul>` : ''}
     ${r.up.length ? `<div style="font-size:12px;margin-top:3px">불리한 점</div><ul style="margin:0;padding-left:16px;font-size:12px">${li(r.up, '#b91c1c')}</ul>` : ''}
-    <div style="color:#9ca3af;font-size:10px;margin-top:3px">${m.model} · ${m.target} · 해제 ${m.n_bad}/도달 ${m.n_good}곳으로 학습 · AUC ${m.auc}. 상대 등급이며 확률 아님</div></div>`;
+    <div style="color:#9ca3af;font-size:10px;margin-top:3px">${m.model} · ${m.target} · 해제 ${m.n_bad}/도달 ${m.n_good}곳으로 학습 · AUC ${m.auc}. 상대 등급이며 확률 아님</div>
+    ${r.g2 ? `<details style="margin-top:6px;border-top:1px solid var(--line);padding-top:4px"><summary style="cursor:pointer">관리처분까지 갈 가능성 <b style="color:${GCOL[r.g2 - 1]};font-size:14px">${GL[r.g2 - 1]}</b> <b style="color:${GCOL[r.g2 - 1]}">${GNM[r.g2 - 1]}</b> <span style="color:#6b7280;font-size:11px">(상위 ${Math.max(1, Math.round(r.p2 * 100))}%)</span></summary>
+      ${r.dn2.length ? `<div style="font-size:12px;margin-top:3px">유리한 점</div><ul style="margin:0;padding-left:16px;font-size:12px">${li(r.dn2, '#15803d')}</ul>` : ''}
+      ${r.up2.length ? `<div style="font-size:12px;margin-top:3px">불리한 점</div><ul style="margin:0;padding-left:16px;font-size:12px">${li(r.up2, '#b91c1c')}</ul>` : ''}
+      <div style="color:#9ca3af;font-size:10px;margin-top:3px">${m.m2.target} · 실패 ${m.m2.n_bad}(사업시행 후 정체 ${m.m2.n_stall} 포함)/성공 ${m.m2.n_good}곳 · AUC ${m.m2.auc}</div></details>` : ''}</div>`;
 }
 function zonePopup(f, at, parcelLink) {
   const z = f.properties, si = +z.si;
@@ -314,6 +318,7 @@ function zonePopup(f, at, parcelLink) {
      ${hh ? `<div style="margin-top:6px">${hh}</div>` : ''}
      ${ds ? `<table style="width:100%;margin-top:6px;font-size:12px">${ds}</table>` : ''}
      ${riskHtml(i)}
+     ${ZP.some(x => x.properties.zi === i && x.properties.approx) ? '<div style="color:#92400e;font-size:11px;margin-top:4px">경계 미확정 — 지도에 점선 원은 구역 면적만큼 그린 추정 범위입니다 (신통 대상지·초기 구역은 정비구역 경계가 아직 고시되지 않음)</div>' : ''}
      ${hasPoly ? `<button onclick="zoneStats(${i})" style="margin-top:8px;width:100%;padding:6px;border:1px solid var(--line);border-radius:6px;background:#fff">구역 분석 (토지 유형·용도지역·소유자·종교/학교)</button>` : ''}
      ${z.url ? `<a href="${z.url}" target="_blank" rel="noopener" style="display:block;margin-top:4px;font-size:12px">정비사업 정보몽땅 →</a>` : ''}
      ${parcelLink ? `<a href="#" onclick="showParcel();return false" style="display:block;margin-top:4px;font-size:12px">이 자리 필지 정보 →</a>` : ''}
@@ -323,24 +328,30 @@ function zonePopup(f, at, parcelLink) {
 function zoneList() {
   const f = $('zf')?.value ?? '', fc_ = $('zc')?.value ?? '', so = $('zs')?.value ?? '', gu = $('zg')?.value ?? '';
   const sc = x => ZS?.z?.[x.properties.zi];
-  const Zc = Z.filter(x => (!fc_ || catOf(x.properties) === fc_) && (!gu || x.properties.gu === gu) && (so !== 'g' || sc(x)));
-  const L = Zc.filter(x => !f || x.properties.s === f).sort(so === 'g' ? (a, b) => sc(a).p - sc(b).p
+  const key = { g: r => r.p, g2: r => r.p2 ?? 1, gg: r => (r.p + (r.p2 ?? r.p)) / 2 }[so];
+  const isRedev = p => !/재건축/.test(p.t || '') && !/아파트|APT|단지/.test(p.n || '');  // 재건축(아파트 단지) 빼고 재개발만
+  const Zc = Z.filter(x => (!fc_ || (fc_ === '__redev' ? isRedev(x.properties) && !SMALLG.includes(x.properties.c) : catOf(x.properties) === fc_)) && (!gu || x.properties.gu === gu) && (!key || sc(x)));
+  const L = Zc.filter(x => !f || x.properties.s === f).sort(key ? (a, b) => key(sc(a)) - key(sc(b))
     : (a, b) => b.properties.si - a.properties.si || a.properties.n.localeCompare(b.properties.n));
   const gus = [...new Set(Z.map(x => x.properties.gu).filter(Boolean))].sort();
   const cnt = [...new Set(Zc.map(x => x.properties.s))].map(s => [s, Zc.filter(x => x.properties.s === s).length]).sort((a, b) => b[1] - a[1]);
   const cats = [...new Set(Z.map(x => catOf(x.properties)))].map(c => [c, Z.filter(x => catOf(x.properties) === c).length]).sort((a, b) => b[1] - a[1]);
   $('panel').innerHTML = `<button class="x" onclick="$('panel').style.display='none'">×</button><h3>정비사업 ${fmt(L.length)}곳</h3>
     <select id="zs" style="width:100%;padding:6px;margin-bottom:6px;font-weight:600">
-      <option value="">단계순 (전체)</option><option value="g" ${so === 'g' ? 'selected' : ''}>초기 구역 · 진행 가능성 높은 순 (A→E)</option></select>
+      <option value="">단계순 (전체)</option><option value="g" ${so === 'g' ? 'selected' : ''}>초기 구역 · 사업시행 진행 가능성 높은 순</option>
+      <option value="g2" ${so === 'g2' ? 'selected' : ''}>초기 구역 · 관리처분까지 갈 가능성 높은 순</option>
+      <option value="gg" ${so === 'gg' ? 'selected' : ''}>초기 구역 · 두 등급 합산 높은 순</option></select>
     <select id="zg" style="width:49%;padding:6px;margin-bottom:6px"><option value="">전체 구</option>${gus.map(g => `<option ${g === gu ? 'selected' : ''}>${g}</option>`).join('')}</select>
     <select id="zc" style="width:49%;padding:6px;margin-bottom:6px"><option value="">전체 유형</option>
+      <option value="__redev" ${fc_ === '__redev' ? 'selected' : ''}>재개발만 (재건축·소규모 제외)</option>
       ${cats.map(([c, n]) => `<option ${c === fc_ ? 'selected' : ''} value="${c}">${c} (${n})</option>`).join('')}</select>
     <select id="zf" style="width:100%;padding:6px;margin-bottom:6px"><option value="">전체 단계</option>
       ${cnt.map(([s, n]) => `<option ${s === f ? 'selected' : ''} value="${s}">${s} (${n})</option>`).join('')}</select>
     ${L.map((x, i) => `<div class="zi" data-i="${Z.indexOf(x)}"><span class="dot" style="background:${scol(+x.properties.si)}"></span>
-      ${sc(x) ? `<b style="color:${GCOL[sc(x).g - 1]};margin-right:2px">${GL[sc(x).g - 1]}</b>` : ''}${x.properties.c ? `<span style="color:${ccol(x.properties.c)};font-size:11px;font-weight:600">${x.properties.c}</span> ` : ''}<b>${x.properties.n}</b> <span style="color:#6b7280">${x.properties.s || ''}</span><br>
+      ${sc(x) ? `<b style="color:${GCOL[sc(x).g - 1]}" title="사업시행 진행 가능성">${GL[sc(x).g - 1]}</b>${sc(x).g2 ? `<b style="color:${GCOL[sc(x).g2 - 1]};margin-right:3px" title="관리처분까지 갈 가능성">${GL[sc(x).g2 - 1]}</b>` : ' '}` : ''}${x.properties.c ? `<span style="color:${ccol(x.properties.c)};font-size:11px;font-weight:600">${x.properties.c}</span> ` : ''}<b>${x.properties.n}</b> <span style="color:#6b7280">${x.properties.s || ''}</span><br>
       <span style="color:#6b7280;font-size:12px">${[x.properties.gu, x.properties.t, x.properties.bh ? '계획 ' + fmt(x.properties.bh) + '세대' : '', x.properties.zd ? '지정 ' + x.properties.zd.slice(0, 4) : ''].filter(Boolean).join(' · ')}</span>
-      ${so === 'g' && sc(x).dn.length ? `<br><span style="color:#15803d;font-size:11px">+ ${sc(x).dn.slice(0, 2).join(' · ')}</span>` : ''}</div>`).join('')}
+      ${key && (so === 'g2' ? sc(x).dn2 : sc(x).dn)?.length ? `<br><span style="color:#15803d;font-size:11px">+ ${(so === 'g2' ? sc(x).dn2 : sc(x).dn).slice(0, 2).join(' · ')}</span>` : ''}</div>`).join('')}
+    ${key ? '<div class="note">등급 두 글자: 앞 = 사업시행까지 진행 가능성, 뒤 = 관리처분까지 갈 가능성 (A 높음 ~ E 낮음, 초기 구역끼리 상대 순위)</div>' : ''}
     <div class="note">재개발·재건축은 서울시 도시정비사업 통계(분기 갱신), 신통기획·모아타운·가로주택·소규모정비·역세권사업은 서울플랜+ 사업 현황 기준. 경계는 토지이용계획(정비구역·모아타운 관리지역·소규모정비 사업구역·도심 공공주택 복합지구).</div>`;
   $('panel').style.display = 'block';
   $('zf').onchange = $('zs').onchange = $('zg').onchange = zoneList; $('zc').onchange = () => { $('zf').value = ''; zoneList(); };

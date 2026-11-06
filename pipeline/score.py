@@ -71,36 +71,65 @@ def samples(d):
     return coh, bad, act, done
 
 
-def main():
+def fit_score(tr, cols, a):
+    """LightGBM 학습 → (CV AUC 평균·표준편차, 대상 구역별 {g 1~5, p 위험 순위, up/dn SHAP 사유}, 평균 영향)"""
     from lightgbm import LGBMClassifier
     from sklearn.model_selection import RepeatedStratifiedKFold, cross_val_score
-    d = load(RAW / 'zone_features.json')
-    _, bad, act, _ = samples(d)
-    tr = pd.concat([bad, act[act.si.between(3, 4)].assign(y=0)])  # 건축심의~사업시행 (철거 전)
-    cols = usable(tr, FULL)
+    cols = usable(tr, cols)
     X, y = tr[cols].astype(float), tr.y.values.astype(int)
-    if y.sum() < 30 or (1 - y).sum() < 20: return print(f'표본 부족 (해제 {y.sum()}, 사업시행 도달 {(1 - y).sum()}) → 등급 생략', flush=True)
     cv = cross_val_score(LGBMClassifier(**PARAMS), X, y, cv=RepeatedStratifiedKFold(n_splits=5, n_repeats=5, random_state=0), scoring='roc_auc')
     m = LGBMClassifier(**PARAMS).fit(X, y)
-    a = d[d.kind.isin(['active_c', 'plus_c']) & (d.si.fillna(-1) <= 2)].copy()  # 아직 사업시행 전(구역지정~조합설립) + 신통기획 등 지정 전 후보
-    a = a.drop_duplicates('id', keep='first')
     Xa = a[cols].astype(float)
-    a['risk'] = m.predict_proba(Xa)[:, 1]
+    risk = pd.Series(m.predict_proba(Xa)[:, 1], index=a.index)
     sh = m.predict(Xa, pred_contrib=True)[:, :-1]  # TreeSHAP (log-odds 기여, 마지막 열은 기준값)
-    a['pr'] = a.risk.rank(pct=True)
+    pr = risk.rank(pct=True)
     out = {}
-    for (_, r), s in zip(a.iterrows(), sh):
+    for (k, r), s in zip(a.iterrows(), sh):
         o = np.argsort(-s)
         why = lambda idx: [f'{LABEL[cols[j]][0]} {LABEL[cols[j]][1](r[cols[j]])}' for j in idx if not pd.isna(r[cols[j]])][:3]
-        out[str(int(r.id))] = dict(g=min(int(r.pr * 5) + 1, 5), p=round(float(r.pr), 3),
+        out[str(int(r.id))] = dict(g=min(int(pr[k] * 5) + 1, 5), p=round(float(pr[k]), 3),
                                    up=why([j for j in o if s[j] > 0.05]), dn=why([j for j in o[::-1] if s[j] < -0.05]))
-    meta = dict(model='LightGBM', target='사업시행 단계 도달 vs 해제 (지정 2003~2015)', n_bad=int(y.sum()), n_good=int((1 - y).sum()),
-                auc=round(float(cv.mean()), 3), auc_sd=round(float(cv.std()), 3), n_scored=len(out))
+    imp = pd.Series(np.abs(m.predict(X, pred_contrib=True)[:, :-1]).mean(0), index=cols).sort_values(ascending=False)
+    return dict(auc=round(float(cv.mean()), 3), auc_sd=round(float(cv.std()), 3), n_bad=int(y.sum()), n_good=int((1 - y).sum())), out, imp
+
+
+# 관리처분 모델용: 철거·조합(법인) 매입에 영향받지 않는 변수만 (위치·시세·용도지역·지정 당시 땅값·면적)
+ROB = ['log_area', 'station_m', 'cityhall_km', 'gangnam_km', 'yeouido_km', 'apt_gu', 'apt_gu_rel', 'apt_dong_rel', 'k_rebuild', 'k_dosi',
+       'z1', 'z2', 'z3', 'zcom', 'lu_heritage', 'log_gj', 'feas', 'far_allow', 'road_ratio', 'seoul_ne', 'seoul_sw']
+LABEL.update(far_allow=('허용 용적률(용도지역)', lambda v: f'{v:.0f}%'), seoul_ne=('동북권', lambda v: '예' if v else '아니오'),
+             seoul_sw=('서남권', lambda v: '예' if v else '아니오'))
+
+
+def main():
+    d = load(RAW / 'zone_features.json')
+    _, bad, act, _ = samples(d)
+    a = d[d.kind.isin(['active_c', 'plus_c']) & (d.si.fillna(-1) <= 2)].copy()  # 아직 사업시행 전(구역지정~조합설립) + 신통기획 등 지정 전 후보
+    a = a.drop_duplicates('id', keep='first')
+    # 1) 사업시행 단계 도달(철거 전) vs 해제
+    tr = pd.concat([bad, act[act.si.between(3, 4)].assign(y=0)])
+    if tr.y.sum() < 30 or (1 - tr.y).sum() < 20: return print(f'표본 부족 → 등급 생략', flush=True)
+    m1, out, imp = fit_score(tr, FULL, a)
+    # 2) 관리처분까지: 실패 = 해제 + 사업시행인가 후 5년 넘게 관리처분 못 감, 성공 = 사업시행 후 5년 안에 관리처분
+    h = act.copy()
+    for c in ('sa', 'gc'): h[c + '_y'] = pd.to_numeric(h[c].astype(str).str[:4], errors='coerce') if c in h else np.nan
+    h = h[h.sa_y.notna()]
+    stall, fast = h[h.gc_y.isna() & (h.sa_y <= 2021)], h[h.gc_y.notna() & (h.gc_y - h.sa_y <= 5)]
+    m2, out2, imp2 = fit_score(pd.concat([bad, stall.assign(y=1), fast.assign(y=0)]), ROB, a) if len(fast) >= 20 else (None, {}, None)
+    for k, v in out2.items():
+        if k in out: out[k].update(g2=v['g'], p2=v['p'], up2=v['up'], dn2=v['dn'])
+    meta = dict(model='LightGBM', target='사업시행 단계 도달 vs 해제 (지정 2003~2015)', n_scored=len(out), **m1)
+    if m2: meta['m2'] = dict(target='5년 안에 관리처분 vs 해제·사업시행 후 5년+ 정체 (위치·시세·용도지역·지정 당시 땅값만)', n_stall=len(stall), **m2)
     own = {str(int(r.id)): [int(r.owners or 0), int(r.owners_hi or 0)] for r in d[d.kind == 'active'].itertuples() if r.owners}  # 경계 안 추정 토지등소유자 (팝업: 분양분과 비교)
     (OUT / 'zscore.json').write_text(json.dumps(dict(meta=meta, z=out, own=own), ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
-    print(f"해제위험 등급 {len(out)}개 구역 · 학습 해제 {meta['n_bad']} vs 사업시행 도달 {meta['n_good']} · CV AUC {meta['auc']} ± {meta['auc_sd']}", flush=True)
-    imp = pd.Series(np.abs(m.predict(X, pred_contrib=True)[:, :-1]).mean(0), index=cols).sort_values(ascending=False)
+    print(f"해제위험 등급 {len(out)}개 구역 · 학습 해제 {m1['n_bad']} vs 사업시행 도달 {m1['n_good']} · CV AUC {m1['auc']} ± {m1['auc_sd']}", flush=True)
     print('  SHAP 평균 영향 상위:', ', '.join(f'{LABEL[k][0]} {v:.2f}' for k, v in imp.head(8).items()), flush=True)
+    if m2:
+        print(f"관리처분 등급 · 실패 {m2['n_bad']}(정체 {len(stall)}) vs 5년 내 관리처분 {m2['n_good']} · CV AUC {m2['auc']} ± {m2['auc_sd']}", flush=True)
+        print('  SHAP 평균 영향 상위:', ', '.join(f'{LABEL[k][0]} {v:.2f}' for k, v in imp2.head(8).items()), flush=True)
+    zs = json.loads((OUT / 'zones.geojson').read_text(encoding='utf-8'))['features'] if (OUT / 'zones.geojson').exists() else []
+    miss = [f['properties'].get('n') for i, f in enumerate(zs) if f['properties'].get('si', 9) <= 2 and str(i) not in out
+            and f['properties'].get('c') in (None, '신통기획', '정비사업')]
+    if miss: print(f'  등급 못 매긴 초기 구역 {len(miss)}곳 (주소로 필지를 못 찾음 등): {miss[:15]}', flush=True)
 
 
 if __name__ == '__main__':

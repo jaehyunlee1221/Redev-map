@@ -150,6 +150,7 @@ def features(P, g, ref, sgg=None):
     return {k: (round(v, 4) if isinstance(v, float) else v) for k, v in f.items()}
 
 
+DEFAULT_AREA = 30000  # ㎡, 면적 정보가 없는 구역에 쓰는 기본 원 크기 (서울 정비구역 중위 약 3ha)
 LT_VARS = dict(lt_apt={'공동주택'}, lt_house={'단독주택'}, lt_nbhd={'근린생활'}, lt_comm={'상업·업무'}, lt_relig={'종교'}, lt_school={'학교'},
                lt_road={'도로'}, lt_park={'공원'}, lt_vacant={'나대지'})  # 토지 유형별 면적 비율 (build.land_type)
 OT_VARS = dict(ow_ind={'개인'}, ow_corp={'법인'}, ow_pub={'국공유'}, ow_clan={'종중', '종교단체'})  # 소유자 유형별 면적 비율
@@ -206,15 +207,15 @@ def main():
     print(f'필지 {len(P.props)} · 건물 {sum(map(len, P.bld.values()))} · 역 {len(P.st)} · 실거래 요약 {len(P.mk)}', flush=True)
     zs = json.loads((OUT / 'zones.geojson').read_text(encoding='utf-8'))['features']
     polys = {f['properties']['zi']: shape(f['geometry']) for f in json.loads((OUT / 'zonepoly.geojson').read_text(encoding='utf-8'))['features']
-             if 'zi' in f['properties']} if (OUT / 'zonepoly.geojson').exists() else {}
+             if 'zi' in f['properties'] and not f['properties'].get('approx')} if (OUT / 'zonepoly.geojson').exists() else {}  # 추정 원(approx)은 실제 경계 아님
     area = zone_areas()
     rows = []
     for i, z in enumerate(zs):
         pr = z['properties']
         if pr.get('c'):  # 서울플랜+에서 덧붙인 사업: 도시정비법 정비사업이 될 신통기획·정비사업만 점수용 변수 (학습엔 안 씀)
-            if pr['c'] not in ('신통기획', '정비사업') or not pr.get('ba'): continue
+            if pr['c'] not in ('신통기획', '정비사업'): continue
             ref = int((pr.get('pd') or '2026')[:4])
-            f = features(P, circle(*z['geometry']['coordinates'], pr['ba']), min(max(ref, 2006), 2026))
+            f = features(P, circle(*z['geometry']['coordinates'], pr.get('ba') or DEFAULT_AREA), min(max(ref, 2006), 2026))
             if f:
                 t = '재건축' if '재건축' in (pr.get('t') or '') or (f.get('lt_apt') or 0) > 0.5 else (pr.get('t') or '')  # 신통은 유형이 없어 공동주택 부지가 절반 넘으면 재건축으로
                 rows.append(dict(kind='plus_c', id=i, name=pr.get('n'), ref=ref, ty=ty(t), s=pr.get('s'), psi=pr.get('si'), c=pr['c'], **f))
@@ -231,7 +232,7 @@ def main():
         else:  # 경계가 아직 없으면(토지이용계획 미수집) 서울시 고시 면적으로 원
             a, src = area.get(norm(pr.get('n'))), '고시'
             x, y = z['geometry']['coordinates']
-            if not a: continue
+            if not a: a, src = DEFAULT_AREA, '기본값'  # 면적도 모르면 정비구역 중위 면적으로 (등급은 매기되 참고)
         f = features(P, circle(x, y, a), ref)  # 해제구역과 같은 방식(원) → 비교용
         if f: rows.append(dict(kind='active_c', id=i, name=pr.get('n'), ref=ref, area_src=src, ty=ty(pr.get('t')), **meta, **f))
     rel = RAW / 'released.json'  # 해제구역 (pipeline.released: 서울시 정비구역 결정고시 이력의 폐지·실효)
