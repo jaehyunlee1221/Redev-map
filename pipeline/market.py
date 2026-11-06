@@ -17,8 +17,8 @@ EXTRA = {'rh': ('RTMSDataSvcRHTrade/getRTMSDataSvcRHTrade',  # 연립·다세대
                 ('mhouseNm', 'houseType', 'buildYear', 'dealAmount', 'dealYear', 'dealMonth', 'excluUseAr', 'landAr', 'umdNm', 'jibun', 'cdealType', 'floor'), (2021, 1)),
          'rhrent': ('RTMSDataSvcRHRent/getRTMSDataSvcRHRent',  # 연립·다세대 전월세 (갭 = 매매 - 전세)
                     ('mhouseNm', 'buildYear', 'deposit', 'monthlyRent', 'dealYear', 'dealMonth', 'excluUseAr', 'umdNm', 'jibun', 'floor', 'contractType'), (2023, 1)),
-         'sh': ('RTMSDataSvcSHTrade/getRTMSDataSvcSHTrade',  # 단독·다가구 매매
-                ('houseType', 'buildYear', 'dealAmount', 'dealYear', 'dealMonth', 'totalFloorAr', 'plottageAr', 'umdNm', 'jibun', 'cdealType'), (2021, 1)),
+         'aptrent': ('RTMSDataSvcAptRent/getRTMSDataSvcAptRent',  # 아파트 전월세 (재건축 아파트 갭)
+                     ('aptNm', 'buildYear', 'deposit', 'monthlyRent', 'dealYear', 'dealMonth', 'excluUseAr', 'umdNm', 'jibun', 'floor', 'contractType'), (2023, 1)),
          'silv': ('RTMSDataSvcSilvTrade/getRTMSDataSvcSilvTrade',  # 분양권·입주권 전매 → 관리처분 이후 실제 프리미엄
                   ('aptNm', 'ownershipGbn', 'dealAmount', 'dealYear', 'dealMonth', 'excluUseAr', 'umdNm', 'jibun', 'floor', 'cdealType'), (2021, 1))}
 

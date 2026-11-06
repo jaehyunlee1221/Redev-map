@@ -52,6 +52,7 @@
     <option value="far">용적률 사용률 (현재/허용)</option>
   </select>
   <button id="zl">정비사업 목록</button>
+  <button id="rc" style="font-weight:600">투자 추천</button>
   <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="zn" checked>정비사업</label>
   <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="zs2" checked>소규모·역세권</label>
   <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="rz">건축규제구역</label>
@@ -125,7 +126,7 @@ map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAc
 map.addControl(new maplibregl.ScaleControl(), 'bottom-right');
 
 // 정비사업 단계 (서울시 도시정비사업 통계 기준)
-let ZS = null, ZV = null;  // 해제위험 등급 (zscore.json)
+let ZS = null, ZV = null, ZI = null;  // 해제위험 등급 (zscore.json)
 const STAGES = ['구역지정', '추진위', '조합설립', '건축심의', '사업시행', '관리처분', '이주', '착공', '준공'];
 const SCOL = ['#fcd34d', '#fb923c', '#f97316', '#ea580c', '#dc2626', '#be123c', '#9d174d', '#6d28d9', '#374151'];
 const scol = i => SCOL[i] ?? '#9ca3af';
@@ -208,6 +209,7 @@ map.on('style.load', async () => {
     Z.forEach((f, i) => f.properties.zi = i);  // 지도에서 누른 점 → Z 원본 (등급·경계 찾기용)
     try { ZS = await (await fetch(D('zscore.json'))).json(); } catch (e) {}  // 해제위험 등급 (모델)
     try { ZV = await (await fetch(D('zvalue.json'))).json(); } catch (e) {}  // 완공 후 가치 (주변 신축 시세)
+    try { ZI = await (await fetch(D('zinvest.json'))).json(); } catch (e) {}  // 투자 기초 숫자
     map.addSource('zones', { type: 'geojson', data: fc(Z) });
     map.addLayer({ id: 'z-pt', type: 'circle', source: 'zones', paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, ['case', ['in', ['coalesce', ['get', 'c'], ''], ['literal', SMALLG]], 3, 5], 15, ['case', ['in', ['coalesce', ['get', 'c'], ''], ['literal', SMALLG]], 6, 9]],
@@ -287,8 +289,79 @@ function valueHtml(i) {  // 사업이 끝났을 때 새 아파트 가치 (지금
   return `<div style="margin-top:8px;padding:6px 8px;border-radius:6px;background:#eff6ff;border-left:4px solid #2563eb">
     완공 후 가치 <span style="font-size:11px;color:#6b7280">(지금 주변 신축 시세 기준)</span><br>
     <b style="font-size:15px">84㎡ 약 ${eok(v.v84)}</b> <span style="color:#6b7280;font-size:12px">· ㎡당 ${fmt(v.ppm)}만원</span>
-    <ul style="margin:2px 0 0;padding-left:16px;font-size:12px;color:#374151">${v.comps.map(([n, d, by, p, k]) => `<li>${n} (${by}년, ${d < 1000 ? d + 'm' : (d / 1000).toFixed(1) + 'km'}) 84㎡ ${eok(p)} <span style="color:#9ca3af">${k}건</span></li>`).join('')}</ul>
-    <div style="color:#9ca3af;font-size:10px;margin-top:2px">${ZV.meta.basis}. 입지·브랜드·층·완공 시점 시세 변화는 반영 안 됨</div></div>`;
+    ${v.hh ? `<div style="font-size:11px;color:#374151">구역 ${v.hest ? '추정 ' : '계획 '}${fmt(v.hh)}세대 기준 단지 규모 보정 ${v.adj >= 0 ? '+' : ''}${(v.adj * 100).toFixed(1)}%</div>` : ''}
+    <ul style="margin:2px 0 0;padding-left:16px;font-size:12px;color:#374151">${v.comps.map(([n, d, by, p, k, h]) => `<li>${n} (${by}년${h ? ', ' + fmt(h) + '세대' : ''}, ${d < 1000 ? d + 'm' : (d / 1000).toFixed(1) + 'km'}) 84㎡ ${eok(p)} <span style="color:#9ca3af">${k}건</span></li>`).join('')}</ul>
+    <div style="color:#9ca3af;font-size:10px;margin-top:2px">${ZV.meta.basis} (세대수 2배 → ㎡당 ${((2 ** ZV.meta.beta - 1) * 100).toFixed(1)}%). 층·향·완공 시점 시세 변화는 반영 안 됨</div></div>`;
+}
+// ---------- 투자 계산 (가정값은 브라우저에 저장, '투자 가정'에서 변경) ----------
+const ADEF = { land: 1.3, ratio: 100, mem: 75 };  // 감정가/공시지가 배수, 비례율(%), 조합원 분양가/신축 시세(%)
+function assume() { try { return { ...ADEF, ...JSON.parse(localStorage.getItem('assume') || '{}') }; } catch (e) { return { ...ADEF }; } }
+function invest(i) {
+  const b = ZI?.z?.[i], v = ZV?.z?.[i];
+  if (!b || !v || !b.pr) return null;
+  const A = assume();
+  const appr = b.la && b.gj ? b.la * b.gj * A.land / 1e4 : null;  // 감정가 (토지분만, 만원)
+  const right = appr != null ? appr * A.ratio / 100 : null;        // 권리가액
+  const sale = v.v84 * A.mem / 100;                                // 조합원 분양가 (84㎡)
+  const share = right != null ? sale - right : null;               // 추가분담금
+  const tax = b.pr * (b.pr <= 6e4 ? 0.011 : b.pr <= 9e4 ? 0.022 : 0.033);  // 취득세 (1주택 기준)
+  const init = b.js ? b.pr - b.js + tax : null;                    // 초기 투자금 (전세 끼고)
+  const total = share != null ? b.pr + tax + share : null;         // 총 투자금
+  const gain = total != null ? v.v84 - total : null;
+  const yr = Math.max(b.yr || 5, 1), ann = total > 0 ? Math.pow(v.v84 / total, 1 / yr) - 1 : null;
+  return { b, v, A, appr, right, prem: right != null ? b.pr - right : null, sale, share, tax, init, total, gain, yr, ann };
+}
+function investHtml(i) {
+  const r = invest(i);
+  if (!r) return '';
+  const { b, v } = r, row = (k, x, note = '') => `<tr><td>${k}</td><td style="text-align:right"><b>${x}</b>${note ? `<div style="color:#9ca3af;font-size:10px">${note}</div>` : ''}</td></tr>`;
+  const e = x => x == null ? '<span style="color:#9ca3af">–</span>' : (x < 0 ? '-' : '') + eok(Math.abs(Math.round(x)));
+  return `<div style="margin-top:8px;padding:6px 8px;border-radius:6px;background:#fefce8;border-left:4px solid #ca8a04">
+    투자 계산 <span style="font-size:11px;color:#6b7280">(${b.k === 'apt' ? '아파트' : '빌라'} 1채 매수 → 84㎡ 입주, 지금 시세 기준)</span>
+    <table style="width:100%;font-size:12px;margin-top:2px">
+      ${row('매수가', e(b.pr), `구역 안 최근 2년 ${b.n}건 중위${b.ex ? ` · 전용 ${b.ex}㎡` : ''}`)}
+      ${row('감정가 추정', e(r.appr), b.la ? `대지지분 ${b.la}㎡ × 공시지가 ${fmt(b.gj)}원 × ${r.A.land}` : '대지지분 정보 없음')}
+      ${row('권리가액', e(r.right), `감정가 × 비례율 ${r.A.ratio}%`)}
+      ${row('프리미엄', e(r.prem), '매수가 − 권리가액')}
+      ${row('조합원 분양가 (84㎡)', e(r.sale), `완공 후 가치 × ${r.A.mem}%`)}
+      ${row('추가분담금', e(r.share), '분양가 − 권리가액')}
+      ${row('초기 투자금', e(r.init), b.js ? `매수가 − 전세 ${eok(b.js)} + 취득세` : '전세 실거래 수집 중')}
+      ${row('총 투자금', e(r.total), '매수가 + 취득세 + 분담금')}
+      ${row('완공 후 가치', e(v.v84))}
+      ${row('기대 차익', `<span style="color:${r.gain >= 0 ? 'var(--ok)' : 'var(--bad)'}">${e(r.gain)}</span>`, `남은 기간 약 ${r.yr}년${r.ann != null ? ` · 연 ${(r.ann * 100).toFixed(1)}%` : ''}`)}
+    </table>
+    <div style="font-size:10px;color:#9ca3af">추정치. 이주비 이자·보유세·양도세·다주택 취득세 중과 미반영, 실제 감정가·비례율·분담금은 관리처분 때 확정 · <a href="#" onclick="assumePanel();return false">가정 바꾸기</a></div></div>`;
+}
+function assumePanel() {
+  const A = assume(), inp = (k, l, st) => `<label style="display:block;margin:6px 0">${l}<br><input id="a_${k}" type="number" step="${st}" value="${A[k]}" style="width:100%;padding:6px"></label>`;
+  $('panel').innerHTML = `<button class="x" onclick="$('panel').style.display='none'">×</button><h3>투자 가정</h3>
+    ${inp('land', '감정가 ÷ 공시지가 (배)', 0.05)}${inp('ratio', '비례율 (%)', 1)}${inp('mem', '조합원 분양가 ÷ 주변 신축 시세 (%)', 1)}
+    <button id="a_save" style="width:100%;padding:8px;margin-top:6px">저장</button> <button id="a_reset" style="width:100%;padding:6px;margin-top:4px">기본값으로</button>
+    <div class="note">감정평가는 보통 공시지가의 1.2~1.5배, 비례율은 사업성에 따라 80~120%, 조합원 분양가는 일반분양가(≈신축 시세)보다 20~30% 낮은 경우가 많습니다. 이 브라우저에만 저장됩니다.</div>`;
+  $('panel').style.display = 'block';
+  $('a_save').onclick = () => { try { localStorage.setItem('assume', JSON.stringify(Object.fromEntries(Object.keys(ADEF).map(k => [k, +$('a_' + k).value])))); } catch (e) {} ; recoPanel(); };
+  $('a_reset').onclick = () => { try { localStorage.removeItem('assume'); } catch (e) {} ; assumePanel(); };
+}
+function recoPanel() {  // 투자 추천: 진행 가능성 등급 + 초기 투자금 한도 + 연 수익률
+  const cap = +($('r_cap')?.value ?? 5), mg = $('r_g')?.value ?? 'C', ty = $('r_t')?.value ?? '', so = $('r_s')?.value ?? 'ann';
+  const L = Z.map((f, i) => ({ f, i, r: invest(i), s: ZS?.z?.[i] || ZS?.zs?.[i] })).filter(x => x.r && x.r.total != null && x.s && GL.indexOf(GL[x.s.g - 1]) <= GL.indexOf(mg)
+    && (x.r.init == null || x.r.init <= cap * 1e4) && (!ty || (ty === 'redev' ? !/재건축/.test(x.f.properties.t || '') && !SMALLG.includes(x.f.properties.c) : ty === 'rebuild' ? /재건축/.test(x.f.properties.t || '') && !SMALLG.includes(x.f.properties.c) : SMALLG.includes(x.f.properties.c))))
+    .sort((a, b) => so === 'gain' ? b.r.gain - a.r.gain : so === 'init' ? (a.r.init ?? 9e9) - (b.r.init ?? 9e9) : b.r.ann - a.r.ann);
+  const e = x => x == null ? '–' : (x < 0 ? '-' : '') + eok(Math.abs(Math.round(x)));
+  const sel = (id, opts, v) => `<select id="${id}" style="width:100%;padding:6px;margin-bottom:6px">${opts.map(([k, l]) => `<option value="${k}" ${k == v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  $('panel').innerHTML = `<button class="x" onclick="$('panel').style.display='none'">×</button><h3>투자 추천 ${L.length}곳</h3>
+    <label style="font-size:12px">초기 투자금 한도 (억원, 전세 끼고)<input id="r_cap" type="number" step="0.5" value="${cap}" style="width:100%;padding:6px;margin-bottom:6px"></label>
+    ${sel('r_g', [['A', '진행 가능성 A만'], ['B', 'B 이상'], ['C', 'C 이상'], ['E', '전체']], mg)}
+    ${sel('r_t', [['', '전체 유형'], ['redev', '재개발 (빌라)'], ['rebuild', '재건축 (아파트)'], ['small', '가로주택·소규모']], ty)}
+    ${sel('r_s', [['ann', '연 수익률 높은 순'], ['gain', '기대 차익 큰 순'], ['init', '초기 투자금 적은 순']], so)}
+    <div style="font-size:11px;margin-bottom:6px"><a href="#" onclick="assumePanel();return false">투자 가정 바꾸기</a> (감정가 배수 ${assume().land} · 비례율 ${assume().ratio}% · 조합원 분양가 ${assume().mem}%)</div>
+    ${L.slice(0, 80).map(x => `<div class="zi" data-i="${x.i}"><b style="color:${GCOL[x.s.g - 1]}">${GL[x.s.g - 1]}</b>${x.s.g2 ? `<b style="color:${GCOL[x.s.g2 - 1]}">${GL[x.s.g2 - 1]}</b>` : ''} <b>${x.f.properties.n}</b> <span style="color:#6b7280">${x.f.properties.s || ''}</span><br>
+      <span style="font-size:12px">초기 ${e(x.r.init)} · 총 ${e(x.r.total)} → 완공 ${e(x.r.v.v84)} · 차익 <b style="color:${x.r.gain >= 0 ? 'var(--ok)' : 'var(--bad)'}">${e(x.r.gain)}</b> · 연 ${(x.r.ann * 100).toFixed(1)}% (${x.r.yr}년)</span><br>
+      <span style="color:#6b7280;font-size:11px">${x.f.properties.gu || ''} · 매수 ${e(x.r.b.pr)} · 프리미엄 ${e(x.r.prem)} · 분담금 ${e(x.r.share)}</span></div>`).join('')}
+    <div class="note">진행 가능성은 모델의 상대 등급, 금액은 지금 시세 기준 추정입니다(이주비 이자·보유세·양도세·다주택 중과 미반영). 투자 판단의 참고 자료이며 실제 감정가·비례율·분담금은 관리처분 때 확정됩니다.</div>`;
+  $('panel').style.display = 'block';
+  ['r_cap', 'r_g', 'r_t', 'r_s'].forEach(id => $(id).onchange = recoPanel);
+  $('panel').querySelectorAll('.zi').forEach(el => el.onclick = () => { const x = Z[+el.dataset.i]; map.flyTo({ center: x.geometry.coordinates, zoom: 16 }); zonePopup(x); if (innerWidth <= 640) $('panel').style.display = 'none'; });
 }
 function riskHtml(i) {  // 진행 가능성 등급 + SHAP 사유 (구역지정~조합설립 단계, 신통기획 등 지정 전 후보)
   const r = ZS && ZS.z[i], c = Z[i]?.properties.c, rs = ZS?.zs?.[i];
@@ -338,6 +411,7 @@ function zonePopup(f, at, parcelLink) {
      ${hh ? `<div style="margin-top:6px">${hh}</div>` : ''}
      ${ds ? `<table style="width:100%;margin-top:6px;font-size:12px">${ds}</table>` : ''}
      ${valueHtml(i)}
+     ${investHtml(i)}
      ${riskHtml(i)}
      ${ZP.some(x => x.properties.zi === i && x.properties.approx) ? '<div style="color:#92400e;font-size:11px;margin-top:4px">경계 미확정 — 지도에 점선 원은 구역 면적만큼 그린 추정 범위입니다 (신통 대상지·초기 구역은 정비구역 경계가 아직 고시되지 않음)</div>' : ''}
      ${hasPoly ? `<button onclick="zoneStats(${i})" style="margin-top:8px;width:100%;padding:6px;border:1px solid var(--line);border-radius:6px;background:#fff">구역 분석 (토지 유형·용도지역·소유자·종교/학교)</button>` : ''}
@@ -383,6 +457,7 @@ function zoneList() {
     if (innerWidth <= 640) $('panel').style.display = 'none';
   });
 }
+$('rc').onclick = () => $('panel').style.display === 'block' && $('r_cap') ? $('panel').style.display = 'none' : recoPanel();
 $('zl').onclick = () => $('panel').style.display === 'block' && $('zf') ? $('panel').style.display = 'none' : zoneList();
 
 // ---------- 구역 그리기 ----------

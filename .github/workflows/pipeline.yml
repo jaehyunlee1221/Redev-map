@@ -75,6 +75,10 @@ jobs:
         if: always()
         continue-on-error: true
         run: python -m pipeline.value 2>&1 | tee value.log; exit ${PIPESTATUS[0]}
+      - name: invest                        # 투자 기초 숫자 (구역 안 빌라·아파트 매매·전세, 대지지분, 공시지가, 남은 기간)
+        if: always()
+        continue-on-error: true
+        run: python -m pipeline.invest 2>&1 | tee invest.log; exit ${PIPESTATUS[0]}
       - name: score                         # 해제위험 등급 (LightGBM + SHAP 사유) → 지도 팝업
         if: always()
         continue-on-error: true
@@ -99,7 +103,7 @@ jobs:
         run: |
           python - <<'EOF'
           import pathlib
-          for n in ('fetch', 'market', 'build', 'redev', 'released', 'features', 'score', 'value'):
+          for n in ('fetch', 'market', 'build', 'redev', 'released', 'features', 'score', 'value', 'invest'):
               p = pathlib.Path(f'{n}.log')
               if p.exists():
                   t = p.read_text(errors='replace')[-3000:].replace('%', '%25').replace('\r', '').replace('\n', '%0A')

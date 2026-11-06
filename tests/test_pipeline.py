@@ -243,6 +243,7 @@ def test_value(tmp_path, monkeypatch):
     class L:
         dong = {('성북구', '길음동'): '1129013400'}
         def find(self, gu, a): return ([127.02, 37.60], '정확') if gu == '성북구' else (None, None)
+        def split(self, gu, a): return gu, None, False, None, 0
     monkeypatch.setattr(value, 'RAW', tmp_path); monkeypatch.setattr(value, 'OUT', tmp_path); monkeypatch.setattr(value, 'Locator', L)
     (tmp_path / 'zones.geojson').write_text(json.dumps(dict(features=[dict(geometry=dict(coordinates=[127.021, 37.601]), properties={})])))
     value.main()
