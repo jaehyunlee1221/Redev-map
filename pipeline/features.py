@@ -150,6 +150,7 @@ def features(P, g, ref, sgg=None):
     return {k: (round(v, 4) if isinstance(v, float) else v) for k, v in f.items()}
 
 
+SMALL_CAT = ('가로주택', '소규모재건축', '소규모재개발', '자율주택')
 DEFAULT_AREA = 30000  # ㎡, 면적 정보가 없는 구역에 쓰는 기본 원 크기 (서울 정비구역 중위 약 3ha)
 LT_VARS = dict(lt_apt={'공동주택'}, lt_house={'단독주택'}, lt_nbhd={'근린생활'}, lt_comm={'상업·업무'}, lt_relig={'종교'}, lt_school={'학교'},
                lt_road={'도로'}, lt_park={'공원'}, lt_vacant={'나대지'})  # 토지 유형별 면적 비율 (build.land_type)
@@ -213,6 +214,11 @@ def main():
     for i, z in enumerate(zs):
         pr = z['properties']
         if pr.get('c'):  # 서울플랜+에서 덧붙인 사업: 도시정비법 정비사업이 될 신통기획·정비사업만 점수용 변수 (학습엔 안 씀)
+            if pr['c'] in SMALL_CAT:  # 소규모정비(가로주택 등): 별도 모델용. 시작 시점을 몰라 모두 2020년 기준으로 (같은 시점 비교)
+                f = features(P, circle(*z['geometry']['coordinates'], pr.get('ba') or 5000), 2020)
+                if f: rows.append(dict(kind='small_c', id=i, name=pr.get('n'), ref=2020, ty=ty(pr.get('t')), s=pr.get('s'), psi=pr.get('si'),
+                                       c=pr['c'], pd=pr.get('pd'), **f))
+                continue
             if pr['c'] not in ('신통기획', '정비사업'): continue
             ref = int((pr.get('pd') or '2026')[:4])
             f = features(P, circle(*z['geometry']['coordinates'], pr.get('ba') or DEFAULT_AREA), min(max(ref, 2006), 2026))

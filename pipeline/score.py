@@ -47,7 +47,7 @@ def load(path):
     d['log_area'] = np.log(d['area_ha'].clip(lower=0.1))
     d['log_gj'] = np.log(d['gj_med'].where(d['gj_med'] > 0))
     d['si'] = d['s'].map(STAGE) if 's' in d else np.nan
-    if 'psi' in d: d.loc[d.kind == 'plus_c', 'si'] = d.loc[d.kind == 'plus_c', 'psi']  # 서울플랜+ 사업은 단계 이름이 달라 redev.plus_si 값 (후보·기획 -1)
+    if 'psi' in d: d.loc[d.kind.isin(['plus_c', 'small_c']), 'si'] = d.loc[d.kind.isin(['plus_c', 'small_c']), 'psi']  # 서울플랜+ 사업은 단계 이름이 달라 redev.plus_si 값 (후보·기획 -1)
     tt = d['ty'].astype(str) if 'ty' in d else d['t'].astype(str)  # features.ty: 출처와 무관하게 같은 기준의 유형
     d['k_rebuild'] = (tt == '재건축').astype(int)
     d['k_dosi'] = (tt == '도시정비형').astype(int)
@@ -117,10 +117,27 @@ def main():
     m2, out2, imp2 = fit_score(pd.concat([bad, stall.assign(y=1), fast.assign(y=0)]), ROB, a) if len(fast) >= 20 else (None, {}, None)
     for k, v in out2.items():
         if k in out: out[k].update(g2=v['g'], p2=v['p'], up2=v['up'], dn2=v['dn'])
+    # 3) 소규모정비(가로주택·소규모재건축 등): 해제 기록이 거의 없어 '정체'를 실패로
+    #    실패 = 조합설립(인가) 추진 단계에서 2022년 이전부터 멈춤(3년+), 또는 조합설립인가 후 2021년 이전부터 멈춤(5년+)
+    #    성공 = 건축심의·사업시행인가 도달 (철거 전이라 건물 변수 그대로)
+    sm = d[d.kind == 'small_c'].copy()
+    out3, m3 = {}, None
+    if len(sm):
+        sy = pd.to_numeric(sm['pd'].astype(str).str[:4], errors='coerce')
+        early = sm.s.astype(str).str.contains('추진|주민합의체')
+        stall3 = sm[(early & (sy <= 2022)) | ((sm.s == '조합설립인가') & (sy <= 2021))]
+        good3 = sm[sm.si.between(3, 4)]
+        tgt = sm[sm.si <= 2].drop_duplicates('id')
+        if len(stall3) >= 30 and len(good3) >= 20:
+            m3, out3, imp3 = fit_score(pd.concat([stall3.assign(y=1), good3.assign(y=0)]), FULL, tgt)
+            m3 = dict(target='건축심의·사업시행 도달 vs 조합설립 단계 3년+ 정체 (서울플랜+ 소규모정비)', n_scored=len(out3), **m3)
+            print(f"소규모정비 등급 {len(out3)}곳 · 정체 {m3['n_bad']} vs 도달 {m3['n_good']} · CV AUC {m3['auc']} ± {m3['auc_sd']}", flush=True)
+            print('  SHAP 평균 영향 상위:', ', '.join(f'{LABEL[k][0]} {v:.2f}' for k, v in imp3.head(8).items()), flush=True)
     meta = dict(model='LightGBM', target='사업시행 단계 도달 vs 해제 (지정 2003~2015)', n_scored=len(out), **m1)
+    if m3: meta['m3'] = m3
     if m2: meta['m2'] = dict(target='5년 안에 관리처분 vs 해제·사업시행 후 5년+ 정체 (위치·시세·용도지역·지정 당시 땅값만)', n_stall=len(stall), **m2)
     own = {str(int(r.id)): [int(r.owners or 0), int(r.owners_hi or 0)] for r in d[d.kind == 'active'].itertuples() if r.owners}  # 경계 안 추정 토지등소유자 (팝업: 분양분과 비교)
-    (OUT / 'zscore.json').write_text(json.dumps(dict(meta=meta, z=out, own=own), ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    (OUT / 'zscore.json').write_text(json.dumps(dict(meta=meta, z=out, zs=out3, own=own), ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     print(f"해제위험 등급 {len(out)}개 구역 · 학습 해제 {m1['n_bad']} vs 사업시행 도달 {m1['n_good']} · CV AUC {m1['auc']} ± {m1['auc_sd']}", flush=True)
     print('  SHAP 평균 영향 상위:', ', '.join(f'{LABEL[k][0]} {v:.2f}' for k, v in imp.head(8).items()), flush=True)
     if m2:

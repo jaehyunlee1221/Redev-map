@@ -280,8 +280,17 @@ function farLine(p) {
 const GCOL = ['#16a34a', '#65a30d', '#ca8a04', '#ea580c', '#dc2626'], GL = 'ABCDE', GNM = ['높음', '다소 높음', '보통', '다소 낮음', '낮음'];
 // 등급: 모델의 해제위험 순위를 뒤집어 '사업 진행 가능성' A(높음)~E(낮음)으로 표시
 function riskHtml(i) {  // 진행 가능성 등급 + SHAP 사유 (구역지정~조합설립 단계, 신통기획 등 지정 전 후보)
-  const r = ZS && ZS.z[i], c = Z[i]?.properties.c;
-  if (!r) return c && SMALLG.includes(c) ? '<div style="margin-top:6px;color:#9ca3af;font-size:11px">진행 가능성 등급: 재개발·재건축(도시정비법) 모델이라 소규모정비·역세권 사업은 대상 아님</div>'
+  const r = ZS && ZS.z[i], c = Z[i]?.properties.c, rs = ZS?.zs?.[i];
+  if (!r && rs) {  // 소규모정비 (가로주택 등): 별도 모델
+    const m = ZS.meta.m3, li = (a, c) => a.map(x => `<li style="color:${c}">${x}</li>`).join('');
+    return `<div style="margin-top:8px;padding:6px 8px;border-radius:6px;background:#f9fafb;border-left:4px solid ${GCOL[rs.g - 1]}">
+      소규모정비 진행 가능성 <b style="color:${GCOL[rs.g - 1]};font-size:15px">${GL[rs.g - 1]}</b> <b style="color:${GCOL[rs.g - 1]}">${GNM[rs.g - 1]}</b>
+      <span style="color:#6b7280;font-size:11px">(조합설립 단계 ${m.n_scored}곳 중 상위 ${Math.max(1, Math.round(rs.p * 100))}%)</span>
+      ${rs.dn.length ? `<div style="font-size:12px;margin-top:3px">유리한 점</div><ul style="margin:0;padding-left:16px;font-size:12px">${li(rs.dn, '#15803d')}</ul>` : ''}
+      ${rs.up.length ? `<div style="font-size:12px;margin-top:3px">불리한 점</div><ul style="margin:0;padding-left:16px;font-size:12px">${li(rs.up, '#b91c1c')}</ul>` : ''}
+      <div style="color:#9ca3af;font-size:10px;margin-top:3px">${m.target} · 정체 ${m.n_bad}/도달 ${m.n_good}곳 · AUC ${m.auc}. 상대 등급이며 확률 아님</div></div>`;
+  }
+  if (!r) return c && SMALLG.includes(c) ? '<div style="margin-top:6px;color:#9ca3af;font-size:11px">진행 가능성 등급: 조합설립 이전 단계의 가로주택·소규모재건축 등에만 (모아타운·역세권 사업은 대상 아님)</div>'
     : +Z[i]?.properties.si >= 3 ? '<div style="margin-top:6px;color:#9ca3af;font-size:11px">진행 가능성 등급은 사업시행 전(구역지정~조합설립) 구역에만 매김</div>' : '';
   const m = ZS.meta, li = (a, c) => a.map(x => `<li style="color:${c}">${x}</li>`).join('');
   return `<div style="margin-top:8px;padding:6px 8px;border-radius:6px;background:#f9fafb;border-left:4px solid ${GCOL[r.g - 1]}">
@@ -327,7 +336,7 @@ function zonePopup(f, at, parcelLink) {
 }
 function zoneList() {
   const f = $('zf')?.value ?? '', fc_ = $('zc')?.value ?? '', so = $('zs')?.value ?? '', gu = $('zg')?.value ?? '';
-  const sc = x => ZS?.z?.[x.properties.zi];
+  const sc = x => ZS?.z?.[x.properties.zi] || ZS?.zs?.[x.properties.zi];
   const key = { g: r => r.p, g2: r => r.p2 ?? 1, gg: r => (r.p + (r.p2 ?? r.p)) / 2 }[so];
   const isRedev = p => !/재건축/.test(p.t || '') && !/아파트|APT|단지/.test(p.n || '');  // 재건축(아파트 단지) 빼고 재개발만
   const Zc = Z.filter(x => (!fc_ || (fc_ === '__redev' ? isRedev(x.properties) && !SMALLG.includes(x.properties.c) : catOf(x.properties) === fc_)) && (!gu || x.properties.gu === gu) && (!key || sc(x)));
