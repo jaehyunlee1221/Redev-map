@@ -228,3 +228,23 @@ def test_land_owner_type():
     assert land_type('도로', '', 0) == '도로' and land_type('대', '공동주택', 3) == '공동주택' and land_type('대', '', 0) == '나대지'
     assert land_type('대', '제2종근린생활시설', 1) == '근린생활' and land_type('종교용지', '', 0) == '종교' and land_type('대', '교육연구시설', 1) == '학교'
     assert [owner_class(v) for v in ('개인', '법인', '국유지', '시,도유지', '종중', '종교단체', '외국인', '기타단체')] == ['개인', '법인', '국공유', '국공유', '종중', '종교단체', '개인', '기타']
+
+
+def test_value(tmp_path, monkeypatch):
+    import json
+    from datetime import date
+    from pipeline import value
+    y = date.today().year
+    (tmp_path / 'rtms' / '11290').mkdir(parents=True)
+    ym = f'{y}01' if date.today().month > 1 else f'{y - 1}12'
+    rows = [dict(aptNm='새단지', buildYear=str(y - 3), dealAmount='168,000', excluUseAr='84', umdNm='길음동', jibun='1', cdealType='')] * 3 \
+         + [dict(aptNm='헌단지', buildYear='1990', dealAmount='80,000', excluUseAr='84', umdNm='길음동', jibun='2', cdealType='')] * 3
+    (tmp_path / 'rtms' / '11290' / f'{ym}.json').write_text(json.dumps(rows))
+    class L:
+        dong = {('성북구', '길음동'): '1129013400'}
+        def find(self, gu, a): return ([127.02, 37.60], '정확') if gu == '성북구' else (None, None)
+    monkeypatch.setattr(value, 'RAW', tmp_path); monkeypatch.setattr(value, 'OUT', tmp_path); monkeypatch.setattr(value, 'Locator', L)
+    (tmp_path / 'zones.geojson').write_text(json.dumps(dict(features=[dict(geometry=dict(coordinates=[127.021, 37.601]), properties={})])))
+    value.main()
+    z = json.loads((tmp_path / 'zvalue.json').read_text())['z']['0']
+    assert z['ppm'] == 2000 and z['v84'] == 168000 and z['comps'][0][0] == '새단지'   # 헌단지(10년 넘음)는 제외

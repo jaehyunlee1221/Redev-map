@@ -125,7 +125,7 @@ map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAc
 map.addControl(new maplibregl.ScaleControl(), 'bottom-right');
 
 // 정비사업 단계 (서울시 도시정비사업 통계 기준)
-let ZS = null;  // 해제위험 등급 (zscore.json)
+let ZS = null, ZV = null;  // 해제위험 등급 (zscore.json)
 const STAGES = ['구역지정', '추진위', '조합설립', '건축심의', '사업시행', '관리처분', '이주', '착공', '준공'];
 const SCOL = ['#fcd34d', '#fb923c', '#f97316', '#ea580c', '#dc2626', '#be123c', '#9d174d', '#6d28d9', '#374151'];
 const scol = i => SCOL[i] ?? '#9ca3af';
@@ -207,6 +207,7 @@ map.on('style.load', async () => {
     Z = (await (await fetch(D('zones.geojson'))).json()).features;
     Z.forEach((f, i) => f.properties.zi = i);  // 지도에서 누른 점 → Z 원본 (등급·경계 찾기용)
     try { ZS = await (await fetch(D('zscore.json'))).json(); } catch (e) {}  // 해제위험 등급 (모델)
+    try { ZV = await (await fetch(D('zvalue.json'))).json(); } catch (e) {}  // 완공 후 가치 (주변 신축 시세)
     map.addSource('zones', { type: 'geojson', data: fc(Z) });
     map.addLayer({ id: 'z-pt', type: 'circle', source: 'zones', paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, ['case', ['in', ['coalesce', ['get', 'c'], ''], ['literal', SMALLG]], 3, 5], 15, ['case', ['in', ['coalesce', ['get', 'c'], ''], ['literal', SMALLG]], 6, 9]],
@@ -279,6 +280,16 @@ function farLine(p) {
 // ---------- 정비사업 ----------
 const GCOL = ['#16a34a', '#65a30d', '#ca8a04', '#ea580c', '#dc2626'], GL = 'ABCDE', GNM = ['높음', '다소 높음', '보통', '다소 낮음', '낮음'];
 // 등급: 모델의 해제위험 순위를 뒤집어 '사업 진행 가능성' A(높음)~E(낮음)으로 표시
+const eok = v => v >= 1e4 ? `${(v / 1e4).toFixed(1)}억` : `${fmt(v)}만`;
+function valueHtml(i) {  // 사업이 끝났을 때 새 아파트 가치 (지금 주변 신축 시세 기준)
+  const v = ZV?.z?.[i];
+  if (!v || +Z[i]?.properties.si >= 8) return '';
+  return `<div style="margin-top:8px;padding:6px 8px;border-radius:6px;background:#eff6ff;border-left:4px solid #2563eb">
+    완공 후 가치 <span style="font-size:11px;color:#6b7280">(지금 주변 신축 시세 기준)</span><br>
+    <b style="font-size:15px">84㎡ 약 ${eok(v.v84)}</b> <span style="color:#6b7280;font-size:12px">· ㎡당 ${fmt(v.ppm)}만원</span>
+    <ul style="margin:2px 0 0;padding-left:16px;font-size:12px;color:#374151">${v.comps.map(([n, d, by, p, k]) => `<li>${n} (${by}년, ${d < 1000 ? d + 'm' : (d / 1000).toFixed(1) + 'km'}) 84㎡ ${eok(p)} <span style="color:#9ca3af">${k}건</span></li>`).join('')}</ul>
+    <div style="color:#9ca3af;font-size:10px;margin-top:2px">${ZV.meta.basis}. 입지·브랜드·층·완공 시점 시세 변화는 반영 안 됨</div></div>`;
+}
 function riskHtml(i) {  // 진행 가능성 등급 + SHAP 사유 (구역지정~조합설립 단계, 신통기획 등 지정 전 후보)
   const r = ZS && ZS.z[i], c = Z[i]?.properties.c, rs = ZS?.zs?.[i];
   if (!r && rs) {  // 소규모정비 (가로주택 등): 별도 모델
@@ -326,6 +337,7 @@ function zonePopup(f, at, parcelLink) {
      <div class="stepn"><span>구역지정</span><span>조합</span><span>사업시행</span><span>관리처분</span><span>착공</span></div>
      ${hh ? `<div style="margin-top:6px">${hh}</div>` : ''}
      ${ds ? `<table style="width:100%;margin-top:6px;font-size:12px">${ds}</table>` : ''}
+     ${valueHtml(i)}
      ${riskHtml(i)}
      ${ZP.some(x => x.properties.zi === i && x.properties.approx) ? '<div style="color:#92400e;font-size:11px;margin-top:4px">경계 미확정 — 지도에 점선 원은 구역 면적만큼 그린 추정 범위입니다 (신통 대상지·초기 구역은 정비구역 경계가 아직 고시되지 않음)</div>' : ''}
      ${hasPoly ? `<button onclick="zoneStats(${i})" style="margin-top:8px;width:100%;padding:6px;border:1px solid var(--line);border-radius:6px;background:#fff">구역 분석 (토지 유형·용도지역·소유자·종교/학교)</button>` : ''}
