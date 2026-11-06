@@ -41,6 +41,11 @@ def stage_gaps():
             v = y(r.get(DATES[k]) or '')
             if v and 0 <= c - v < 30: to_cs[k].append(c - v)
     rem = {k: statistics.median(v) for k, v in to_cs.items() if len(v) >= 5}
+    prev = None  # 뒤 단계가 앞 단계보다 오래 남을 수는 없음 (추진위 날짜가 구역지정보다 앞선 옛 구역 등 표본 차이)
+    for k in ORDER[:-1]:
+        if k in rem:
+            if prev is not None: rem[k] = min(rem[k], prev)
+            prev = rem[k]
     return step, rem, {f'{a}→{b}': round(v, 1) for (a, b), v in med.items()}, {k: (round(v, 1), len(to_cs[k])) for k, v in rem.items()}
 
 
