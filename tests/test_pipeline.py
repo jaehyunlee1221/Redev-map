@@ -249,3 +249,41 @@ def test_value(tmp_path, monkeypatch):
     value.main()
     z = json.loads((tmp_path / 'zvalue.json').read_text())['z']['0']
     assert z['ppm'] == 2000 and z['v84'] == 168000 and z['comps'][0][0] == '새단지'   # 헌단지(10년 넘음)는 제외
+
+
+def test_invest_latest_same_size(tmp_path, monkeypatch):
+    """매수는 가장 최근 거래가 기본, 전세는 같은 건물·같은 전용(±3㎡) 최근 것, 완공 가치는 같은 평형 최근 거래가"""
+    import json
+    from datetime import date
+    from pipeline import invest, value
+    t = date.today()
+    ym1, ym2 = (t.year - 1) * 100 + t.month, t.year * 100 + (t.month - 1 if t.month > 1 else 1)
+    for kind, rows in {'rh': {ym1: [dict(dealAmount='30,000', excluUseAr='40', landAr='20', umdNm='길음동', jibun='5', cdealType='')],
+                              ym2: [dict(dealAmount='35,000', excluUseAr='60', landAr='30', umdNm='길음동', jibun='5', cdealType='', dealDay='3')]},
+                       'rhrent': {ym2: [dict(deposit='20,000', monthlyRent='0', excluUseAr='41', umdNm='길음동', jibun='5'),
+                                        dict(deposit='25,000', monthlyRent='0', excluUseAr='59', umdNm='길음동', jibun='5')]},
+                       'rtms': {ym1: [dict(aptNm='새단지', buildYear=str(t.year - 2), dealAmount='150,000', excluUseAr='84.9', umdNm='길음동', jibun='1', cdealType='')],
+                                ym2: [dict(aptNm='새단지', buildYear=str(t.year - 2), dealAmount='160,000', excluUseAr='84.9', umdNm='길음동', jibun='1', cdealType=''),
+                                      dict(aptNm='새단지', buildYear=str(t.year - 2), dealAmount='120,000', excluUseAr='59.9', umdNm='길음동', jibun='1', cdealType='')]}}.items():
+        for ym, rr in rows.items():
+            (tmp_path / kind / '11290').mkdir(parents=True, exist_ok=True)
+            (tmp_path / kind / '11290' / f'{ym}.json').write_text(json.dumps(rr))
+    class L:
+        dong = {('성북구', '길음동'): '1129013400'}
+        def find(self, gu, a): return ([127.02, 37.60], '정확')
+        def split(self, gu, a): return gu, '1129013400', False, int(a.split()[-1]), 0
+    (tmp_path / 'p').mkdir()
+    (tmp_path / 'p' / '1129013400.json').write_text(json.dumps([dict(p='1129013400100050000', gj=3000000)]))
+    zone = dict(type='Feature', geometry=dict(type='Point', coordinates=[127.02, 37.60]), properties=dict(si=2, t='재개발', c='정비구역'))
+    (tmp_path / 'zones.geojson').write_text(json.dumps(dict(features=[zone])))
+    (tmp_path / 'zonepoly.geojson').write_text(json.dumps(dict(features=[])))
+    for m in (invest, value):
+        monkeypatch.setattr(m, 'RAW', tmp_path); monkeypatch.setattr(m, 'OUT', tmp_path); monkeypatch.setattr(m, 'Locator', L)
+    monkeypatch.setattr(value, 'rd', lambda *a: [])
+    value.main()
+    v = json.loads((tmp_path / 'zvalue.json').read_text())['z']['0']
+    assert v['v84'] == 160000 and v['v59'] == 120000  # 같은 평형 가장 최근 거래
+    invest.main()
+    z = json.loads((tmp_path / 'zinvest.json').read_text())['z']['0']
+    assert z['pr'] == 35000 and z['ex'] == 60 and z['la'] == 30 and z['js'] == 25000 and z['gj'] == 3000000
+    assert z['t'][1][2] == 30000 and z['t'][1][8] == 20000 and z['t'][1][10] == 1

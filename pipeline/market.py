@@ -11,16 +11,16 @@ from .common import RAW, regions
 RT = 'https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev'
 ST = 'http://openapi.seoul.go.kr:8088/{key}/json/subwayStationMaster/{a}/{b}/'
 DK, SK = os.environ.get('DATA_GO_KR_KEY', ''), os.environ.get('SEOUL_API_KEY', '')
-FIELDS = ('aptNm', 'buildYear', 'dealAmount', 'dealYear', 'dealMonth', 'excluUseAr', 'umdNm', 'jibun', 'cdealType', 'floor')
+FIELDS = ('aptNm', 'buildYear', 'dealAmount', 'dealYear', 'dealMonth', 'dealDay', 'excluUseAr', 'umdNm', 'jibun', 'cdealType', 'floor')
 # 투자 계산용 추가 실거래 (같은 DATA_GO_KR_KEY, 각각 data.go.kr 활용신청 필요) — 이름: (경로, 필드, 시작 연월)
 EXTRA = {'rh': ('RTMSDataSvcRHTrade/getRTMSDataSvcRHTrade',  # 연립·다세대 매매 (대지권 면적 landAr 포함)
-                ('mhouseNm', 'houseType', 'buildYear', 'dealAmount', 'dealYear', 'dealMonth', 'excluUseAr', 'landAr', 'umdNm', 'jibun', 'cdealType', 'floor'), (2021, 1)),
+                ('mhouseNm', 'houseType', 'buildYear', 'dealAmount', 'dealYear', 'dealMonth', 'dealDay', 'excluUseAr', 'landAr', 'umdNm', 'jibun', 'cdealType', 'floor'), (2021, 1)),
          'rhrent': ('RTMSDataSvcRHRent/getRTMSDataSvcRHRent',  # 연립·다세대 전월세 (갭 = 매매 - 전세)
-                    ('mhouseNm', 'buildYear', 'deposit', 'monthlyRent', 'dealYear', 'dealMonth', 'excluUseAr', 'umdNm', 'jibun', 'floor', 'contractType'), (2023, 1)),
+                    ('mhouseNm', 'buildYear', 'deposit', 'monthlyRent', 'dealYear', 'dealMonth', 'dealDay', 'excluUseAr', 'umdNm', 'jibun', 'floor', 'contractType'), (2023, 1)),
          'aptrent': ('RTMSDataSvcAptRent/getRTMSDataSvcAptRent',  # 아파트 전월세 (재건축 아파트 갭)
-                     ('aptNm', 'buildYear', 'deposit', 'monthlyRent', 'dealYear', 'dealMonth', 'excluUseAr', 'umdNm', 'jibun', 'floor', 'contractType'), (2023, 1)),
+                     ('aptNm', 'buildYear', 'deposit', 'monthlyRent', 'dealYear', 'dealMonth', 'dealDay', 'excluUseAr', 'umdNm', 'jibun', 'floor', 'contractType'), (2023, 1)),
          'silv': ('RTMSDataSvcSilvTrade/getRTMSDataSvcSilvTrade',  # 분양권·입주권 전매 → 관리처분 이후 실제 프리미엄
-                  ('aptNm', 'ownershipGbn', 'dealAmount', 'dealYear', 'dealMonth', 'excluUseAr', 'umdNm', 'jibun', 'floor', 'cdealType'), (2021, 1))}
+                  ('aptNm', 'ownershipGbn', 'dealAmount', 'dealYear', 'dealMonth', 'dealDay', 'excluUseAr', 'umdNm', 'jibun', 'floor', 'cdealType'), (2021, 1))}
 
 
 def months(start=(2006, 1)):
