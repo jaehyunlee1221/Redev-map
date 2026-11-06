@@ -8,5 +8,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: pip install -q requests && python tools/probe_seoul.py ${{ inputs.args }}
-        env: { SEOUL_API_KEY: '${{ secrets.SEOUL_API_KEY }}' }
+      - run: pip install -q requests && if [ "${{ inputs.args }}" = rtms ]; then python tools/probe_rtms.py; else python tools/probe_seoul.py ${{ inputs.args }}; fi
+        env: { SEOUL_API_KEY: '${{ secrets.SEOUL_API_KEY }}', DATA_GO_KR_KEY: '${{ secrets.DATA_GO_KR_KEY }}' }
