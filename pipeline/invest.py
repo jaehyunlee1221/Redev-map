@@ -108,10 +108,14 @@ def main():
         if len(buy) < 2: continue
         pr = [num(r['dealAmount']) for r, _ in buy]
         ex = [num(r['excluUseAr']) for r, _ in buy if num(r['excluUseAr'])]
-        if apt:  # 대지지분 = 구역 대지 합 ÷ 기존 세대 (아파트 실거래엔 대지지분이 없음)
+        if apt:  # 아파트 실거래엔 대지지분이 없음 → 거래된 단지 필지 면적 ÷ 그 필지 세대수(건축물대장), 없으면 구역 대지×0.75 ÷ 기존 세대
             inside = [q for q in (prop(pnu) for _, pnu in buy) if q]
             gj = med([q['gj'] for q in inside if q.get('gj')])
-            la = round(g.area * 111320 * math.cos(math.radians(g.centroid.y)) * 110540 * 0.75 / p['eh'], 1) if p.get('eh') else None
+            per = [q['ar'] / u for q in inside if q.get('ar') and (u := max(q.get('hh') or 0, q.get('ho') or 0)) >= 20]
+            la = med([v for v in per if 5 <= v <= 200])
+            if la is None and (p.get('eh') or 0) >= 50:
+                la = round(g.area * 111320 * math.cos(math.radians(g.centroid.y)) * 110540 * 0.75 / p['eh'], 1)
+            if la is not None and not 5 <= la <= 200: la = None  # 말이 안 되는 값은 버림 (기존 세대 수가 잘못 적힌 구역 등)
         else:
             la = med([num(r.get('landAr')) for r, _ in buy if num(r.get('landAr'))])
             gj = med([q['gj'] for q in (prop(pnu) for _, pnu in buy) if q and q.get('gj')])
