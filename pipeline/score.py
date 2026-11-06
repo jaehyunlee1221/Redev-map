@@ -7,11 +7,13 @@ import json
 import numpy as np, pandas as pd
 from .common import RAW, OUT
 
-FULL = ['old_ratio', 'age_mean', 'bldg_per_ha', 'hh_per_ha', 'owners_per_ha', 'jiphap_ratio', 'new5_before_ref', 'small_ratio', 'dae_ratio',
+FULL = ['old_ratio', 'age_mean', 'bldg_per_ha', 'hh_per_ha', 'units_ref_per_ha', 'jiphap_ratio', 'new5_before_ref', 'small_ratio', 'dae_ratio',
         'road_ratio', 'pub_ratio', 'far_room', 'far_now', 'z1', 'z2', 'z3', 'zcom', 'lu_heritage', 'log_area', 'log_gj',
         'station_m', 'cityhall_km', 'gangnam_km', 'yeouido_km', 'apt_gu', 'price_gap', 'k_rebuild', 'k_dosi',
-        'lt_apt', 'lt_house', 'lt_nbhd', 'lt_comm', 'has_relig', 'has_school', 'ow_ind', 'ow_corp', 'ow_pub', 'ow_clan',
-        'feas', 'gfa_per_owner', 'apt_dong_new', 'apt_dong_rel', 'apt_gu_rel']
+        'lt_apt', 'lt_house', 'lt_nbhd', 'lt_comm', 'has_relig', 'has_school',
+        'feas', 'apt_dong_new', 'apt_dong_rel', 'apt_gu_rel']
+# 현재 소유정보(소유자 수·법인·국공유 비율)는 학습에서 뺌: 사업이 진행되면 조합·신탁사(법인)가 땅을 사들여 바뀜 (관리처분 구역 법인 비율 26%, 착공 50% vs 조합설립 5%)
+# → 지정 당시 건물로 추정한 소유 단위(units_ref_per_ha)를 대신 씀. 소유자 유형은 구역 분석 화면에서만 보여줌
 FIXED = ['log_area', 'station_m', 'cityhall_km', 'gangnam_km', 'yeouido_km', 'apt_gu', 'apt_gu_new', 'k_rebuild', 'k_dosi', 'seoul_ne', 'seoul_sw']
 STAGE = {'구역지정': 0, '추진위': 1, '조합설립': 2, '건축심의': 3, '사업시행': 4, '관리처분': 5, '이주': 6, '착공': 7, '준공': 8}
 pct = lambda v: f'{v:.0%}'
@@ -30,6 +32,7 @@ LABEL = {  # 변수 → (이름, 값 표시)
     'lt_comm': ('상업·업무시설 부지 비율', pct), 'lt_vacant': ('나대지 비율', pct), 'has_relig': ('종교시설', lambda v: '있음' if v else '없음'),
     'has_school': ('학교', lambda v: '있음' if v else '없음'), 'ow_ind': ('개인 소유 면적 비율', pct), 'ow_corp': ('법인 소유 면적 비율', pct),
     'ow_pub': ('국공유지 면적 비율', pct), 'ow_clan': ('종중·종교단체 소유 비율', pct),
+    'units_ref_per_ha': ('소유 단위 밀도(지정 당시 추정)', lambda v: f'{v:.0f}/ha'),
     'feas': ('추정 사업성(비례율 근사)', lambda v: f'{v * 100:.0f}%'), 'gfa_per_owner': ('소유자당 지을 수 있는 연면적', lambda v: f'{v:.0f}㎡'),
     'apt_dong_new': ('동 신축 아파트 시세(지정 당시)', lambda v: f'{v:,.0f}만원/㎡'),
     'apt_dong_rel': ('동 신축 시세 (그해 서울 중간=100)', lambda v: f'{v * 100:.0f}'), 'apt_gu_rel': ('구 신축 시세 (그해 서울 중간=100)', lambda v: f'{v * 100:.0f}'),

@@ -64,6 +64,17 @@ def main(path, out=None):
     mA, res['A'], cA = fit('A) 사업시행 단계 도달(철거 전) vs 해제 (전체 변수) ← 지도 등급', A, FULL)
     _, res['B'], _ = fit('B) 관리처분 도달 vs 해제 (전체 변수, 이주 중 멸실 누수 주의)', B, FULL)
     _, res['C'], _ = fit('C) 사업시행 이상·완료 vs 해제 (시간불변 변수만)', C, FIXED)
+    # D) 사용자 정의 실패: 해제 + 사업시행인가 후 5년 넘게 관리처분 못 감 / 성공: 사업시행 후 5년 안에 관리처분
+    #    관리처분 이후는 철거·조합(법인) 매입으로 건물·소유 변수가 바뀌므로 위치·시세·용도지역·지정 당시 땅값 등만
+    a = act.copy()
+    for c in ('sa', 'gc'): a[c + '_y'] = pd.to_numeric(a[c].astype(str).str[:4], errors='coerce')
+    h = a[a.sa_y.notna()]
+    stall, fast = h[h.gc_y.isna() & (h.sa_y <= 2021)], h[h.gc_y.notna() & (h.gc_y - h.sa_y <= 5)]
+    ROB = ['log_area', 'station_m', 'cityhall_km', 'gangnam_km', 'yeouido_km', 'apt_gu', 'apt_gu_rel', 'apt_dong_rel', 'k_rebuild', 'k_dosi',
+           'z1', 'z2', 'z3', 'zcom', 'lu_heritage', 'log_gj', 'feas', 'far_allow', 'road_ratio', 'seoul_ne', 'seoul_sw']
+    D = pd.concat([bad, stall.assign(y=1), fast.assign(y=0)])
+    print(f'\n정체(사업시행 5년+ 관리처분 없음) {len(stall)} · 5년 내 관리처분 {len(fast)}')
+    _, res['D'], _ = fit('D) (해제 + 사업시행 후 5년+ 정체) vs 5년 내 관리처분 (철거·매입 영향 없는 변수)', D, ROB)
     allact = d[d.kind == 'active_c'].copy()
     allact['risk'] = mA.predict_proba(allact[usable(A, FULL)].astype(float))[:, 1]
     print('\n진행 구역 해제위험(모델 A) 단계별 중위:', allact.groupby('s').risk.median().round(3).to_dict())

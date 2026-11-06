@@ -196,7 +196,7 @@ def test_score(tmp_path, monkeypatch):
         r = {c: random.random() for c in cols}
         r.update(kind=k, id=i, ref=2008, n_bldg=20, area_ha=2, gj_med=3e6, cx=127, cy=37.5, post_hh=0, t='재개발', ty='주택정비형',
                  s='사업시행' if i < 200 else '조합설립')
-        if k == 'released': r['owners_per_ha'] += 1
+        if k == 'released': r['units_ref_per_ha'] += 1
         rows.append(r)
     rows += [dict(rows[-1], kind='plus_c', id=900, s='기획완료', psi=-1), dict(rows[-1], kind='plus_c', id=901, s='착공', psi=7)]
     monkeypatch.setattr(score, 'RAW', tmp_path); monkeypatch.setattr(score, 'OUT', tmp_path)

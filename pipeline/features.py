@@ -124,6 +124,11 @@ def features(P, g, ref, sgg=None):
         pu = (max(b0, key=lambda b: num(b.get('totArea'))).get('mainPurpsCdNm') or '') if b0 else ''
         return land_type(p.get('jm') or '', pu, len(b0))
     lts = {p['p']: lt_at(p) for p in ps}
+    def units_at(p):  # 기준연도 시점 소유 단위 추정: 집합건물이면 그때 호수, 아니면 필지 1명 (국공유 0) — 현재 소유정보는 조합·신탁 매입이 섞여서
+        if p.get('pub'): return 0
+        ho = sum(int(num(b.get('hoCnt'))) for b in P.bld.get(p['p'], []) if (year(b.get('useAprDay')) or 0) <= ref and '집합' in (b.get('regstrGbCdNm') or ''))
+        return ho or (1 if p.get('jm') not in ('도로', '하천', '구거', '공원') else 0)
+    f['units_ref_per_ha'] = sum(units_at(p) for p in ps) / ha
     sh = lambda key, vals: sum(p.get('ar', 0) for p in ps if (lts[p['p']] if key == 'lt' else p.get(key)) in vals) / ar  # 면적 비율
     for k, v in LT_VARS.items(): f[k] = sh('lt', v)
     known = sh('ot', OT_ALL)
