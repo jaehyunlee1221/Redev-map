@@ -9,6 +9,9 @@ on:
       region:
         description: 'config.yaml 지역 키 또는 시군구코드 (예: test / seoul / seoul,seongnam / 11650)'
         default: seeded
+      market:
+        description: '실거래 수집 (off = 이미 받은 데이터로 지도만 다시 계산)'
+        default: 'on'
   schedule:
     - cron: '0 18 1 * *'   # 매월 2일 03:00 KST
 
@@ -42,7 +45,7 @@ jobs:
         env:
           DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
       - name: market                        # 모델용: 아파트 실거래·지하철역 (실패해도 지도 빌드는 계속)
-        if: always()
+        if: always() && inputs.market != 'off'
         continue-on-error: true
         timeout-minutes: 90
         run: python -m pipeline.market 3000 2>&1 | tee market.log; exit ${PIPESTATUS[0]}
