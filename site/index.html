@@ -358,7 +358,7 @@ function investHtml(i) {
     ${pick}<table style="width:100%;font-size:12px;margin-top:2px">
       ${row('매수가', e(b.pr), `${ymS(b.ym)} 실거래 · 전용 ${b.ex}㎡${b.la ? ` · 대지 ${PY(b.la)}평` : ''}${b.by ? ` · ${b.by}년 준공` : ''}`)}
       ${row('권리가액 추정', e(r.right), b.la ? `토지 ${PY(b.la)}평 × 공시지가 ${fmt(Math.round(b.gj * 3.3058 / 1e4))}만/평 × ${r.A.land} + 건물 · 비례율 ${r.A.ratio}%` : '대지지분 정보 없음')}
-      ${row('프리미엄', e(r.prem), r.prem != null && r.prem < 0 ? '⚠ 권리가액이 매수가보다 높게 추정됨 — 비싼 필지가 섞였거나 감정가 배수가 높음' : '매수가 − 권리가액')}
+      ${row('프리미엄', e(r.prem), r.prem != null && r.prem < 0 ? '⚠ 권리가액이 매수가보다 높게 추정됨 — 반지하·지분 거래 같은 특이 거래이거나 감정가 배수가 높음. 다른 거래로 바꿔 보세요' : '매수가 − 권리가액')}
       ${row(`조합원 분양가 (${r.u}㎡ · ${r.u === 84 ? 34 : 25}평)`, e(r.sale), `주변 신축 같은 평형 ${eok(r.val)} × ${r.A.mem}%${r.u === r.auto ? ' · 권리가액 순 예상 배정' : ''}`)}
       ${row('추가분담금', e(r.share), r.share < 0 ? '권리가액이 분양가보다 커서 환급' : '조합원 분양가 − 권리가액')}
       ${row('초기 투자금', e(r.init), b.js ? `매수가 − 전세 ${eok(b.js)} (${b.jsame ? '같은 건물' : '구역 안'} 전용 ±3㎡, ${ymS(b.jym)})` : '같은 전용 전세 거래 없음')}
@@ -381,7 +381,8 @@ function assumePanel() {
 }
 function recoPanel() {  // 투자 추천: 진행 가능성 등급 + 초기 투자금 한도 + 연 수익률
   const cap = +($('r_cap')?.value ?? 5), mg = $('r_g')?.value ?? 'C', ty = $('r_t')?.value ?? '', so = $('r_s')?.value ?? 'ann';
-  const L = Z.map((f, i) => ({ f, i, r: invest(i), s: ZS?.z?.[i] || ZS?.zs?.[i] })).filter(x => x.r && x.r.total != null && x.s && GL.indexOf(GL[x.s.g - 1]) <= GL.indexOf(mg)
+  const neg = $('r_neg')?.checked ?? false;
+  const L = Z.map((f, i) => ({ f, i, r: invest(i), s: ZS?.z?.[i] || ZS?.zs?.[i] })).filter(x => x.r && x.r.total != null && x.s && (neg || x.r.prem >= 0) && GL.indexOf(GL[x.s.g - 1]) <= GL.indexOf(mg)
     && (x.r.init == null || x.r.init <= cap * 1e4) && (!ty || (ty === 'redev' ? !/재건축/.test(x.f.properties.t || '') && !SMALLG.includes(x.f.properties.c) : ty === 'rebuild' ? /재건축/.test(x.f.properties.t || '') && !SMALLG.includes(x.f.properties.c) : SMALLG.includes(x.f.properties.c))))
     .sort((a, b) => so === 'gain' ? b.r.gain - a.r.gain : so === 'init' ? (a.r.init ?? 9e9) - (b.r.init ?? 9e9) : b.r.ann - a.r.ann);
   const e = x => x == null ? '–' : (x < 0 ? '-' : '') + eok(Math.abs(Math.round(x)));
@@ -391,13 +392,14 @@ function recoPanel() {  // 투자 추천: 진행 가능성 등급 + 초기 투�
     ${sel('r_g', [['A', '진행 가능성 A만'], ['B', 'B 이상'], ['C', 'C 이상'], ['E', '전체']], mg)}
     ${sel('r_t', [['', '전체 유형'], ['redev', '재개발 (빌라)'], ['rebuild', '재건축 (아파트)'], ['small', '가로주택·소규모']], ty)}
     ${sel('r_s', [['ann', '연 수익률 높은 순'], ['gain', '안전마진 큰 순'], ['init', '초기 투자금 적은 순']], so)}
+    <label style="font-size:11px;display:block;margin-bottom:4px"><input type="checkbox" id="r_neg" ${neg ? 'checked' : ''}> 프리미엄이 마이너스로 추정된 곳도 포함 (반지하·지분 거래 등 특이 거래일 가능성이 커 기본 제외)</label>
     <div style="font-size:11px;margin-bottom:6px"><a href="#" onclick="assumePanel();return false">투자 가정 바꾸기</a> (감정가 배수 ${assume().land} · 비례율 ${assume().ratio}% · 조합원 분양가 ${assume().mem}%) · 매물은 각 구역 가장 최근 실거래, 평형은 권리가액 순 예상 배정</div>
     ${L.slice(0, 80).map(x => `<div class="zi" data-i="${x.i}"><b style="color:${GCOL[x.s.g - 1]}">${GL[x.s.g - 1]}</b>${x.s.g2 ? `<b style="color:${GCOL[x.s.g2 - 1]}">${GL[x.s.g2 - 1]}</b>` : ''} <b>${x.f.properties.n}</b> <span style="color:#6b7280">${x.f.properties.s || ''}</span><br>
       <span style="font-size:12px">초기 ${e(x.r.init)} · 총 ${e(x.r.total)} → ${x.r.u}㎡ 신축 ${e(x.r.val)} · 안전마진 <b style="color:${x.r.gain >= 0 ? 'var(--ok)' : 'var(--bad)'}">${e(x.r.gain)}</b> · 연 ${(x.r.ann * 100).toFixed(1)}% (${x.r.yr}년)</span><br>
       <span style="color:#6b7280;font-size:11px">${x.f.properties.gu || ''} · 매수 ${e(x.r.b.pr)} · 프리미엄 ${e(x.r.prem)} · 분담금 ${e(x.r.share)}</span></div>`).join('')}
     <div class="note">진행 가능성은 모델의 상대 등급, 금액은 지금 시세 기준 추정입니다(이주비 이자·보유세·양도세·다주택 중과 미반영). 투자 판단의 참고 자료이며 실제 감정가·비례율·분담금은 관리처분 때 확정됩니다.</div>`;
   $('panel').style.display = 'block';
-  ['r_cap', 'r_g', 'r_t', 'r_s'].forEach(id => $(id).onchange = recoPanel);
+  ['r_cap', 'r_g', 'r_t', 'r_s', 'r_neg'].forEach(id => $(id).onchange = recoPanel);
   $('panel').querySelectorAll('.zi').forEach(el => el.onclick = () => { const x = Z[+el.dataset.i]; map.flyTo({ center: x.geometry.coordinates, zoom: 16 }); zonePopup(x); if (innerWidth <= 640) $('panel').style.display = 'none'; });
 }
 function riskHtml(i) {  // 진행 가능성 등급 + SHAP 사유 (구역지정~조합설립 단계, 신통기획 등 지정 전 후보)
